@@ -15,41 +15,43 @@ fn main() {
         .define("Boost_USE_STATIC_LIBS",  "OFF")
         .build();
 
-    for lib in vec!["solc", "solidity", "yul", "langutil", "evmasm", "solutil", "smtutil"] {
+    /*for lib in vec!["solc", "solidity", "yul", "langutil", "evmasm", "solutil", "smtutil"] {
         println!(
             "cargo:rustc-link-search=native={}/build/lib{}",
             dst.display(),
             lib
         );
         println!("cargo:rustc-link-lib=static={}", lib);
+    }*/
+
+    for lib in vec!["solc"] {
+        println!(
+            "cargo:rustc-link-search=native={}/build/lib{}",
+            dst.display(),
+            lib
+        );
+        println!("cargo:rustc-link-lib={}", lib);
     }
 
-    println!("cargo:rustc-link-search=native={}/lib", dst.display());
+    // println!("cargo:rustc-link-search=native={}/lib", dst.display());
 
-    // jsoncpp dependency
-    println!(
-        "cargo:rustc-link-search=native={}/build/deps/lib",
-        dst.display()
-    );
-    println!("cargo:rustc-link-lib=static=jsoncpp");
-
-    println!("cargo:rustc-link-search=native=/usr/lib/");
-    println!("cargo:rustc-link-search=native=/usr/lib64/");
-    println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu/");
-    println!("cargo:rustc-link-search=native=/usr/local/lib/");
+    // println!("cargo:rustc-link-search=native=/usr/lib/");
+    // println!("cargo:rustc-link-search=native=/usr/lib64/");
+    // println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu/");
+    // println!("cargo:rustc-link-search=native=/usr/local/lib/");
 
     //println!("cargo:rustc-link-lib=static=boost_system");
     //println!("cargo:rustc-link-lib=static=boost_filesystem");
     //println!("cargo:rustc-link-lib=static=boost_regex");
     
-    println!("cargo:rustc-link-lib=boost_system");
-    println!("cargo:rustc-link-lib=boost_filesystem");
-    println!("cargo:rustc-link-lib=boost_regex");
+    // println!("cargo:rustc-link-lib=boost_system");
+    // println!("cargo:rustc-link-lib=boost_filesystem");
+    // println!("cargo:rustc-link-lib=boost_regex");
 
     // We need to link against C++ std lib
-    if let Some(cpp_stdlib) = get_cpp_stdlib() {
-        println!("cargo:rustc-link-lib={}", cpp_stdlib);
-    }
+    // if let Some(cpp_stdlib) = get_cpp_stdlib() {
+    //     println!("cargo:rustc-link-lib={}", cpp_stdlib);
+    // }
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
@@ -71,7 +73,7 @@ fn main() {
 }
 
 // See https://github.com/alexcrichton/gcc-rs/blob/88ac58e25/src/lib.rs#L1197
-fn get_cpp_stdlib() -> Option<String> {
+/*fn get_cpp_stdlib() -> Option<String> {
     env::var("TARGET").ok().and_then(|target| {
         if target.contains("msvc") {
             None
@@ -85,4 +87,4 @@ fn get_cpp_stdlib() -> Option<String> {
             Some("stdc++".to_string())
         }
     })
-}
+}*/
