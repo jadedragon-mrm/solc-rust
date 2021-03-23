@@ -1,0 +1,17 @@
+[package]
+name = "solc"
+description = "Solidity bindings for Rust"
+version = "0.1.0"
+authors = ["Alex Beregszaszi <alex@rtfs.hu>"]
+license = "GPL-3.0"
+repository = "https://github.com/axic/solc-rust"
+homepage = "https://github.com/axic/solc-rust"
+keywords = ["ethereum", "solidity", "external-ffi-bindings"]
+edition = "2018"
+
+[dependencies]
+lazy_static = "1"
+
+[build-dependencies]
+bindgen = "0.56.0"
+cmake = "0.1"
