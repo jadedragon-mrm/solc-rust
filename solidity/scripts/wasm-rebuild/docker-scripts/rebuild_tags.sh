@@ -86,7 +86,7 @@ function process_tag() {
   local TAG=$1
   cd /src
   # Checkout the historic commit instead of the tag directly.
-  local HISTORIC_COMMIT_HASH="$(grep "${TAG}+" /tmp/release_commit_list.txt | cut -d '+' -f 2 | cut -d '.' -f 2)"
+  local HISTORIC_COMMIT_HASH; HISTORIC_COMMIT_HASH="$(grep "${TAG}+" /tmp/release_commit_list.txt | cut -d '+' -f 2 | cut -d '.' -f 2)"
   if [ "$(git cat-file -t "${HISTORIC_COMMIT_HASH}" 2>/dev/null)" == "commit" ]; then
     clean_git_checkout "$HISTORIC_COMMIT_HASH"
   else
@@ -103,7 +103,7 @@ function process_tag() {
     VERSION=$(echo "$TAG" | cut -d v -f 2)
   fi
 
-  local COMMIT_HASH=$(git rev-parse --short=8 HEAD)
+  local COMMIT_HASH; COMMIT_HASH=$(git rev-parse --short=8 HEAD)
   local FULL_VERSION_SUFFIX="${TAG}+commit.${COMMIT_HASH}"
   local HISTORIC_VERSION_SUFFIX="${TAG}+commit.${HISTORIC_COMMIT_HASH}"
 
@@ -190,6 +190,7 @@ echo "Extract bytecode comparison scripts from v0.6.1..."
 cd /root/project
 git checkout v0.6.1 --quiet
 cp scripts/bytecodecompare/storebytecode.sh /tmp
+# shellcheck disable=SC2016
 sed -i -e 's/rm -rf "\$TMPDIR"/cp "\$TMPDIR"\/report.txt \/tmp\/report.txt ; rm -rf "\$TMPDIR"/' /tmp/storebytecode.sh
 sed -i -e 's/REPO_ROOT=.*/REPO_ROOT=\/src/' /tmp/storebytecode.sh
 export SOLC_EMSCRIPTEN="On"

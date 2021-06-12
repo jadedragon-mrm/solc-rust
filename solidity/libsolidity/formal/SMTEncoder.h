@@ -51,7 +51,10 @@ namespace solidity::frontend
 class SMTEncoder: public ASTConstVisitor
 {
 public:
-	SMTEncoder(smt::EncodingContext& _context);
+	SMTEncoder(
+		smt::EncodingContext& _context,
+		ModelCheckerSettings const& _settings
+	);
 
 	/// @returns true if engine should proceed with analysis.
 	bool analyze(SourceUnit const& _sources);
@@ -62,11 +65,17 @@ public:
 	/// @returns the key type in _type.
 	/// _type must allow IndexAccess, that is,
 	/// it must be either ArrayType or MappingType
-	static TypePointer keyType(TypePointer _type);
+	static Type const* keyType(Type const* _type);
 
 	/// @returns the innermost element in a chain of 1-tuples if applicable,
 	/// otherwise _expr.
 	static Expression const* innermostTuple(Expression const& _expr);
+
+	/// @returns the expression after stripping redundant syntactic sugar.
+	/// Currently supports stripping:
+	/// 1. 1-tuple; i.e. ((x)) -> x
+	/// 2. Explicit cast from string to bytes; i.e. bytes(s) -> s; for s of type string
+	static Expression const* cleanExpression(Expression const& _expr);
 
 	/// @returns the FunctionDefinition of a FunctionCall
 	/// if possible or nullptr.
@@ -106,6 +115,10 @@ public:
 
 	static std::set<FunctionCall const*> collectABICalls(ASTNode const* _node);
 
+	/// @returns all the sources that @param _source depends on,
+	/// including itself.
+	static std::set<SourceUnit const*, ASTNode::CompareByID> sourceDependencies(SourceUnit const& _source);
+
 protected:
 	// TODO: Check that we do not have concurrent reads and writes to a variable,
 	// because the order of expression evaluation is undefined
@@ -123,6 +136,7 @@ protected:
 	bool visit(IfStatement const&) override { return false; }
 	bool visit(WhileStatement const&) override { return false; }
 	bool visit(ForStatement const&) override { return false; }
+	void endVisit(ForStatement const&) override {}
 	void endVisit(VariableDeclarationStatement const& _node) override;
 	bool visit(Assignment const& _node) override;
 	void endVisit(Assignment const& _node) override;
@@ -144,6 +158,8 @@ protected:
 	bool visit(InlineAssembly const& _node) override;
 	void endVisit(Break const&) override {}
 	void endVisit(Continue const&) override {}
+	bool visit(TryCatchClause const&) override { return true; }
+	void endVisit(TryCatchClause const&) override {}
 	bool visit(TryStatement const&) override { return false; }
 
 	virtual void pushInlineFrame(CallableDeclaration const&);
@@ -160,7 +176,7 @@ protected:
 		Token _op,
 		smtutil::Expression const& _left,
 		smtutil::Expression const& _right,
-		TypePointer const& _commonType,
+		Type const* _commonType,
 		Expression const& _expression
 	);
 
@@ -168,7 +184,7 @@ protected:
 		Token _op,
 		smtutil::Expression const& _left,
 		smtutil::Expression const& _right,
-		TypePointer const& _commonType
+		Type const* _commonType
 	);
 
 	void compareOperation(BinaryOperation const& _op);
@@ -189,6 +205,10 @@ protected:
 	void visitStructConstructorCall(FunctionCall const& _funCall);
 	void visitFunctionIdentifier(Identifier const& _identifier);
 	void visitPublicGetter(FunctionCall const& _funCall);
+
+	/// @returns true if @param _contract is set for analysis in the settings
+	/// and it is not abstract.
+	bool shouldAnalyze(ContractDefinition const& _contract) const;
 
 	bool isPublicGetter(Expression const& _expr);
 
@@ -214,14 +234,20 @@ protected:
 
 	void arrayPush(FunctionCall const& _funCall);
 	void arrayPop(FunctionCall const& _funCall);
-	void arrayPushPopAssign(Expression const& _expr, smtutil::Expression const& _array);
 	/// Allows BMC and CHC to create verification targets for popping
 	/// an empty array.
 	virtual void makeArrayPopVerificationTarget(FunctionCall const&) {}
+	/// Allows BMC and CHC to create verification targets for out of bounds access.
+	virtual void makeOutOfBoundsVerificationTarget(IndexAccess const&) {}
 
 	void addArrayLiteralAssertions(
 		smt::SymbolicArrayVariable& _symArray,
 		std::vector<smtutil::Expression> const& _elementValues
+	);
+
+	void bytesToFixedBytesAssertions(
+		smt::SymbolicArrayVariable& _symArray,
+		Expression const& _fixedBytes
 	);
 
 	/// @returns a pair of expressions representing _left / _right and _left mod _right, respectively.
@@ -242,10 +268,11 @@ protected:
 	void assignment(VariableDeclaration const& _variable, smtutil::Expression const& _value);
 	/// Handles assignments between generic expressions.
 	/// Will also be used for assignments of tuple components.
+	void assignment(Expression const& _left, smtutil::Expression const& _right);
 	void assignment(
 		Expression const& _left,
 		smtutil::Expression const& _right,
-		TypePointer const& _type
+		Type const* _type
 	);
 	/// Handle assignments between tuples.
 	void tupleAssignment(Expression const& _left, Expression const& _right);
@@ -255,7 +282,7 @@ protected:
 	void expressionToTupleAssignment(std::vector<std::shared_ptr<VariableDeclaration>> const& _variables, Expression const& _rhs);
 
 	/// Maps a variable to an SSA index.
-	using VariableIndices = std::unordered_map<VariableDeclaration const*, int>;
+	using VariableIndices = std::unordered_map<VariableDeclaration const*, unsigned>;
 
 	/// Visits the branch given by the statement, pushes and pops the current path conditions.
 	/// @param _condition if present, asserts that this condition is true within the branch.
@@ -278,34 +305,34 @@ protected:
 	/// a subexpression of the same type as _varDecl.
 	void resetReferences(VariableDeclaration const& _varDecl);
 	/// Resets all references/pointers that have type _type.
-	void resetReferences(TypePointer _type);
+	void resetReferences(Type const* _type);
 	/// @returns the type without storage pointer information if it has it.
-	TypePointer typeWithoutPointer(TypePointer const& _type);
+	Type const* typeWithoutPointer(Type const* _type);
 	/// @returns whether _a or a subtype of _a is the same as _b.
-	bool sameTypeOrSubtype(TypePointer _a, TypePointer _b);
+	bool sameTypeOrSubtype(Type const* _a, Type const* _b);
 
-	/// Given two different branches and the touched variables,
-	/// merge the touched variables into after-branch ite variables
-	/// using the branch condition as guard.
-	void mergeVariables(std::set<VariableDeclaration const*> const& _variables, smtutil::Expression const& _condition, VariableIndices const& _indicesEndTrue, VariableIndices const& _indicesEndFalse);
+	/// Given the state of the symbolic variables at the end of two different branches,
+	/// create a merged state using the given branch condition.
+	void mergeVariables(smtutil::Expression const& _condition, VariableIndices const& _indicesEndTrue, VariableIndices const& _indicesEndFalse);
 	/// Tries to create an uninitialized variable and returns true on success.
 	bool createVariable(VariableDeclaration const& _varDecl);
 
 	/// @returns an expression denoting the value of the variable declared in @a _decl
 	/// at the current point.
-	smtutil::Expression currentValue(VariableDeclaration const& _decl);
+	smtutil::Expression currentValue(VariableDeclaration const& _decl) const;
 	/// @returns an expression denoting the value of the variable declared in @a _decl
 	/// at the given index. Does not ensure that this index exists.
-	smtutil::Expression valueAtIndex(VariableDeclaration const& _decl, unsigned _index);
+	smtutil::Expression valueAtIndex(VariableDeclaration const& _decl, unsigned _index) const;
 	/// Returns the expression corresponding to the AST node.
 	/// If _targetType is not null apply conversion.
 	/// Throws if the expression does not exist.
-	smtutil::Expression expr(Expression const& _e, TypePointer _targetType = nullptr);
+	smtutil::Expression expr(Expression const& _e, Type const* _targetType = nullptr);
 	/// Creates the expression (value can be arbitrary)
 	void createExpr(Expression const& _e);
 	/// Creates the expression and sets its value.
 	void defineExpr(Expression const& _e, smtutil::Expression _value);
-
+	/// Creates the tuple expression and sets its value.
+	void defineExpr(Expression const& _e, std::vector<std::optional<smtutil::Expression>> const& _values);
 	/// Overwrites the current path condition
 	void setPathCondition(smtutil::Expression const& _e);
 	/// Adds a new path condition
@@ -358,6 +385,13 @@ protected:
 	/// type conversion.
 	std::vector<smtutil::Expression> symbolicArguments(FunctionCall const& _funCall, ContractDefinition const* _contextContract);
 
+	/// Traverses all source units available collecting free functions
+	/// and internal library functions in m_freeFunctions.
+	void collectFreeFunctions(std::set<SourceUnit const*, ASTNode::CompareByID> const& _sources);
+	std::set<FunctionDefinition const*, ASTNode::CompareByID> const& allFreeFunctions() const { return m_freeFunctions; }
+	/// Create symbolic variables for the free constants in all @param _sources.
+	void createFreeConstants(std::set<SourceUnit const*, ASTNode::CompareByID> const& _sources);
+
 	/// @returns a note to be added to warnings.
 	std::string extraComment();
 
@@ -391,6 +425,10 @@ protected:
 
 	/// Stores the current function/modifier call/invocation path.
 	std::vector<CallStackEntry> m_callStack;
+
+	/// Stack of scopes.
+	std::vector<ScopeOpener const*> m_scopes;
+
 	/// Returns true if the current function was not visited by
 	/// a function call.
 	bool isRootFunction();
@@ -422,8 +460,14 @@ protected:
 
 	ContractDefinition const* m_currentContract = nullptr;
 
+	/// Stores the free functions and internal library functions.
+	/// Those need to be encoded repeatedely for every analyzed contract.
+	std::set<FunctionDefinition const*, ASTNode::CompareByID> m_freeFunctions;
+
 	/// Stores the context of the encoding.
 	smt::EncodingContext& m_context;
+
+	ModelCheckerSettings const& m_settings;
 
 	smt::SymbolicState& state();
 };

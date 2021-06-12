@@ -61,11 +61,15 @@ struct CallGraph
 	/// any calls.
 	std::map<Node, std::set<Node, CompareByID>, CompareByID> edges;
 
-	/// Contracts that may get created with `new` by functions present in the graph.
-	std::set<ContractDefinition const*, ASTNode::CompareByID> createdContracts;
+	/// Contracts that need to be compiled before this one can be compiled.
+	/// The value is the ast node that created the dependency.
+	std::map<ContractDefinition const*, ASTNode const*, ASTCompareByID<ContractDefinition>> bytecodeDependency;
 
 	/// Events that may get emitted by functions present in the graph.
 	std::set<EventDefinition const*, ASTNode::CompareByID> emittedEvents;
+
+	/// Errors that are used by functions present in the graph.
+	std::set<ErrorDefinition const*, ASTNode::CompareByID> usedErrors;
 };
 
 }

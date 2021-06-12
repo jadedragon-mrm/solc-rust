@@ -93,27 +93,25 @@ template <class T>
 inline std::vector<T> operator+(std::vector<T>&& _a, std::vector<T>&& _b)
 {
 	std::vector<T> ret(std::move(_a));
-	if (&_a == &_b)
-		ret += ret;
-	else
-		ret += std::move(_b);
+	assert(&_a != &_b);
+	ret += std::move(_b);
 	return ret;
 }
 
 /// Concatenate something to a sets of elements.
-template <class T, class U>
-inline std::set<T> operator+(std::set<T> const& _a, U&& _b)
+template <class U, class... T>
+inline std::set<T...> operator+(std::set<T...> const& _a, U&& _b)
 {
-	std::set<T> ret(_a);
+	std::set<T...> ret(_a);
 	ret += std::forward<U>(_b);
 	return ret;
 }
 
 /// Concatenate something to a sets of elements, move variant.
-template <class T, class U>
-inline std::set<T> operator+(std::set<T>&& _a, U&& _b)
+template <class U, class... T>
+inline std::set<T...> operator+(std::set<T...>&& _a, U&& _b)
 {
-	std::set<T> ret(std::move(_a));
+	std::set<T...> ret(std::move(_a));
 	ret += std::forward<U>(_b);
 	return ret;
 }
@@ -375,7 +373,7 @@ inline void toBigEndian(T _val, Out& o_out)
 
 /// Converts a big-endian byte-stream represented on a templated collection to a templated integer value.
 /// @a In will typically be either std::string or bytes.
-/// @a T will typically by unsigned, u160, u256 or bigint.
+/// @a T will typically by unsigned, u256 or bigint.
 template <class T, class In>
 inline T fromBigEndian(In const& _bytes)
 {
@@ -385,7 +383,6 @@ inline T fromBigEndian(In const& _bytes)
 	return ret;
 }
 inline bytes toBigEndian(u256 _val) { bytes ret(32); toBigEndian(_val, ret); return ret; }
-inline bytes toBigEndian(u160 _val) { bytes ret(20); toBigEndian(_val, ret); return ret; }
 
 /// Convenience function for toBigEndian.
 /// @returns a byte array just big enough to represent @a _val.
@@ -407,7 +404,8 @@ inline std::string toHex(u256 val, HexPrefix prefix = HexPrefix::DontAdd)
 	return (prefix == HexPrefix::Add) ? "0x" + str : str;
 }
 
-inline std::string toCompactHexWithPrefix(u256 const& _value)
+template <class T>
+inline std::string toCompactHexWithPrefix(T _value)
 {
 	return toHex(toCompactBigEndian(_value, 1), HexPrefix::Add);
 }

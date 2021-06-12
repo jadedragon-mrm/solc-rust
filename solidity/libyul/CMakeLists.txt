@@ -49,10 +49,12 @@ add_library(yul
 	Utilities.h
 	YulString.h
 	backends/evm/AbstractAssembly.h
-	backends/evm/AsmCodeGen.h
 	backends/evm/AsmCodeGen.cpp
+	backends/evm/AsmCodeGen.h
 	backends/evm/ConstantOptimiser.cpp
 	backends/evm/ConstantOptimiser.h
+	backends/evm/EthAssemblyAdapter.cpp
+	backends/evm/EthAssemblyAdapter.h
 	backends/evm/EVMAssembly.cpp
 	backends/evm/EVMAssembly.h
 	backends/evm/EVMCodeTransform.cpp
@@ -65,6 +67,8 @@ add_library(yul
 	backends/evm/EVMMetrics.h
 	backends/evm/NoOutputAssembly.h
 	backends/evm/NoOutputAssembly.cpp
+	backends/evm/VariableReferenceCounter.h
+	backends/evm/VariableReferenceCounter.cpp
 	backends/wasm/EVMToEwasmTranslator.cpp
 	backends/wasm/EVMToEwasmTranslator.h
 	backends/wasm/BinaryTransform.cpp
@@ -131,6 +135,8 @@ add_library(yul
 	optimiser/FunctionGrouper.h
 	optimiser/FunctionHoister.cpp
 	optimiser/FunctionHoister.h
+	optimiser/FunctionSpecializer.cpp
+	optimiser/FunctionSpecializer.h
 	optimiser/InlinableExpressionFunctionFinder.cpp
 	optimiser/InlinableExpressionFunctionFinder.h
 	optimiser/KnowledgeBase.cpp
@@ -160,6 +166,8 @@ add_library(yul
 	optimiser/RedundantAssignEliminator.h
 	optimiser/Rematerialiser.cpp
 	optimiser/Rematerialiser.h
+	optimiser/SMTSolver.cpp
+	optimiser/SMTSolver.h
 	optimiser/SSAReverser.cpp
 	optimiser/SSAReverser.h
 	optimiser/SSATransform.cpp

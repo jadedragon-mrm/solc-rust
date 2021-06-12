@@ -24,8 +24,8 @@
 #include <libsolidity/parsing/Parser.h>
 
 #include <libsolidity/interface/Version.h>
-#include <libyul/AsmParser.h>
 #include <libyul/AST.h>
+#include <libyul/AsmParser.h>
 #include <libyul/backends/evm/EVMDialect.h>
 #include <liblangutil/ErrorReporter.h>
 #include <liblangutil/Scanner.h>
@@ -112,8 +112,16 @@ ASTPointer<SourceUnit> Parser::parse(shared_ptr<Scanner> const& _scanner)
 				nodes.push_back(parseFunctionDefinition(true));
 				break;
 			default:
+				if (
+					// Workaround because `error` is not a keyword.
+					m_scanner->currentToken() == Token::Identifier &&
+					currentLiteral() == "error" &&
+					m_scanner->peekNextToken() == Token::Identifier &&
+					m_scanner->peekNextNextToken() == Token::LParen
+				)
+					nodes.push_back(parseErrorDefinition());
 				// Constant variable.
-				if (variableDeclarationStart() && m_scanner->peekNextToken() != Token::EOS)
+				else if (variableDeclarationStart() && m_scanner->peekNextToken() != Token::EOS)
 				{
 					VarDeclParserOptions options;
 					options.kind = VarDeclKind::FileLevel;
@@ -351,6 +359,14 @@ ASTPointer<ContractDefinition> Parser::parseContractDefinition()
 				subNodes.push_back(parseStructDefinition());
 			else if (currentTokenValue == Token::Enum)
 				subNodes.push_back(parseEnumDefinition());
+			else if (
+				// Workaround because `error` is not a keyword.
+				currentTokenValue == Token::Identifier &&
+				currentLiteral() == "error" &&
+				m_scanner->peekNextToken() == Token::Identifier &&
+				m_scanner->peekNextNextToken() == Token::LParen
+			)
+				subNodes.push_back(parseErrorDefinition());
 			else if (variableDeclarationStart())
 			{
 				VarDeclParserOptions options;
@@ -705,9 +721,6 @@ ASTPointer<VariableDeclaration> Parser::parseVariableDeclaration(
 	ASTPointer<TypeName> type = _lookAheadArrayType ? _lookAheadArrayType : parseTypeName();
 	nodeFactory.setEndPositionFromNode(type);
 
-	if (_options.kind == VarDeclKind::Other && documentation != nullptr)
-		parserError(2837_error, "Only state variables or file-level variables can have a docstring.");
-
 	if (dynamic_cast<FunctionTypeName*>(type.get()) && _options.kind == VarDeclKind::State && m_scanner->currentToken() == Token::LBrace)
 		fatalParserError(
 			2915_error,
@@ -915,6 +928,21 @@ ASTPointer<EventDefinition> Parser::parseEventDefinition()
 	nodeFactory.markEndPosition();
 	expectToken(Token::Semicolon);
 	return nodeFactory.createNode<EventDefinition>(name, nameLocation, documentation, parameters, anonymous);
+}
+
+ASTPointer<ErrorDefinition> Parser::parseErrorDefinition()
+{
+	RecursionGuard recursionGuard(*this);
+	ASTNodeFactory nodeFactory(*this);
+	ASTPointer<StructuredDocumentation> documentation = parseStructuredDocumentation();
+
+	solAssert(*expectIdentifierToken() == "error", "");
+	auto&& [name, nameLocation] = expectIdentifierWithLocation();
+
+	ASTPointer<ParameterList> parameters = parseParameterList({});
+	nodeFactory.markEndPosition();
+	expectToken(Token::Semicolon);
+	return nodeFactory.createNode<ErrorDefinition>(name, move(nameLocation), documentation, parameters);
 }
 
 ASTPointer<UsingForDirective> Parser::parseUsingDirective()
@@ -1219,11 +1247,13 @@ ASTPointer<Statement> Parser::parseStatement(bool _allowUnchecked)
 			statement = parseEmitStatement(docString);
 			break;
 		case Token::Identifier:
-			if (m_insideModifier && m_scanner->currentLiteral() == "_")
-				{
-					statement = ASTNodeFactory(*this).createNode<PlaceholderStatement>(docString);
-					m_scanner->next();
-				}
+			if (m_scanner->currentLiteral() == "revert" && m_scanner->peekNextToken() == Token::Identifier)
+				statement = parseRevertStatement(docString);
+			else if (m_insideModifier && m_scanner->currentLiteral() == "_")
+			{
+				statement = ASTNodeFactory(*this).createNode<PlaceholderStatement>(docString);
+				m_scanner->next();
+			}
 			else
 				statement = parseSimpleStatement(docString);
 			break;
@@ -1269,7 +1299,7 @@ ASTPointer<InlineAssembly> Parser::parseInlineAssembly(ASTPointer<ASTString> con
 	if (block == nullptr)
 		BOOST_THROW_EXCEPTION(FatalError());
 
-	location.end = block->location.end;
+	location.end = block->debugData->location.end;
 	return make_shared<InlineAssembly>(nextID(), location, _docString, dialect, block);
 }
 
@@ -1389,7 +1419,7 @@ ASTPointer<ForStatement> Parser::parseForStatement(ASTPointer<ASTString> const& 
 	expectToken(Token::For);
 	expectToken(Token::LParen);
 
-	// LTODO: Maybe here have some predicate like peekExpression() instead of checking for semicolon and RParen?
+	// TODO: Maybe here have some predicate like peekExpression() instead of checking for semicolon and RParen?
 	if (m_scanner->currentToken() != Token::Semicolon)
 		initExpression = parseSimpleStatement(ASTPointer<ASTString>());
 	expectToken(Token::Semicolon);
@@ -1443,8 +1473,38 @@ ASTPointer<EmitStatement> Parser::parseEmitStatement(ASTPointer<ASTString> const
 	nodeFactory.markEndPosition();
 	expectToken(Token::RParen);
 	auto eventCall = eventCallNodeFactory.createNode<FunctionCall>(eventName, arguments, names);
-	auto statement = nodeFactory.createNode<EmitStatement>(_docString, eventCall);
-	return statement;
+	return nodeFactory.createNode<EmitStatement>(_docString, eventCall);
+}
+
+ASTPointer<RevertStatement> Parser::parseRevertStatement(ASTPointer<ASTString> const& _docString)
+{
+	ASTNodeFactory nodeFactory(*this);
+	solAssert(*expectIdentifierToken() == "revert", "");
+
+	ASTNodeFactory errorCallNodeFactory(*this);
+
+	solAssert(m_scanner->currentToken() == Token::Identifier, "");
+
+	IndexAccessedPath iap;
+	while (true)
+	{
+		iap.path.push_back(parseIdentifier());
+		if (m_scanner->currentToken() != Token::Period)
+			break;
+		m_scanner->next();
+	}
+
+	auto errorName = expressionFromIndexAccessStructure(iap);
+	expectToken(Token::LParen);
+
+	vector<ASTPointer<Expression>> arguments;
+	vector<ASTPointer<ASTString>> names;
+	std::tie(arguments, names) = parseFunctionCallArguments();
+	errorCallNodeFactory.markEndPosition();
+	nodeFactory.markEndPosition();
+	expectToken(Token::RParen);
+	auto errorCall = errorCallNodeFactory.createNode<FunctionCall>(errorName, arguments, names);
+	return nodeFactory.createNode<RevertStatement>(_docString, errorCall);
 }
 
 ASTPointer<Statement> Parser::parseSimpleStatement(ASTPointer<ASTString> const& _docString)

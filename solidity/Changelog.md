@@ -1,3 +1,116 @@
+### 0.8.5 (2021-06-10)
+
+Language Features:
+ * Allowing conversion from ``bytes`` and ``bytes`` slices to ``bytes1``/.../``bytes32``.
+ * Yul: Add ``verbatim`` builtin function to inject arbitrary bytecode.
+
+
+Compiler Features:
+ * Code Generator: Insert helper functions for panic codes instead of inlining unconditionally. This can reduce costs if many panics (checks) are inserted, but can increase costs where few panics are used.
+ * EVM: Set the default EVM version to "Berlin".
+ * SMTChecker: Function definitions can be annotated with the custom Natspec tag ``custom:smtchecker abstract-function-nondet`` to be abstracted by a nondeterministic value when called.
+ * Standard JSON / combined JSON: New artifact "functionDebugData" that contains bytecode offsets of entry points of functions and potentially more information in the future.
+ * Yul Optimizer: Evaluate ``keccak256(a, c)``, when the value at memory location ``a`` is known at compile time and ``c`` is a constant ``<= 32``.
+
+
+Bugfixes:
+ * AST: Do not output value of Yul literal if it is not a valid UTF-8 string.
+ * Code Generator: Fix internal error when function arrays are assigned to storage variables and the function types can be implicitly converted but are not identical.
+ * Code Generator: Fix internal error when super would have to skip an unimplemented function in the virtual resolution order.
+ * Control Flow Graph: Assume unimplemented modifiers use a placeholder.
+ * Control Flow Graph: Take internal calls to functions that always revert into account for reporting unused or unassigned variables.
+ * Function Call Graph: Fix internal error connected with circular constant references.
+ * Name Resolver: Do not issue shadowing warning if the shadowing name is not directly accessible.
+ * Natspec: Allow multiple ``@return`` tags on public state variable documentation.
+ * SMTChecker: Fix internal error on conversion from ``bytes`` to ``fixed bytes``.
+ * SMTChecker: Fix internal error on external calls from the constructor.
+ * SMTChecker: Fix internal error on struct constructor with fixed bytes member initialized with string literal.
+ * Source Locations: Properly set source location of scoped blocks.
+ * Standard JSON: Properly allow the ``inliner`` setting under ``settings.optimizer.details``.
+ * Type Checker: Fix internal compiler error related to having mapping types in constructor parameter for abstract contracts.
+ * Type Checker: Fix internal compiler error when attempting to use an invalid external function type on pre-byzantium EVMs.
+ * Type Checker: Fix internal compiler error when overriding receive ether function with one having different parameters during inheritance.
+ * Type Checker: Make errors about (nested) mapping type in event or error parameter into fatal type errors.
+ * Type Checker: Fix internal compiler error when overriding an implemented modifier with an unimplemented one.
+
+
+AST Changes:
+ * Add member `hexValue` for Yul string and hex literals.
+
+
+
+### 0.8.4 (2021-04-21)
+
+Important Bugfixes:
+ * ABI Decoder V2: For two-dimensional arrays and specially crafted data in memory, the result of ``abi.decode`` can depend on data elsewhere in memory. Calldata decoding is not affected.
+
+
+Language Features:
+ * Assembly / Yul: Allow hex string literals.
+ * Possibility to use ``bytes.concat`` with variable number of ``bytes`` and ``bytesNN`` arguments which behaves as a restricted version of `abi.encodePacked` with a more descriptive name.
+ * Support custom errors via the ``error`` keyword and introduce the ``revert`` statement.
+
+
+Compiler Features:
+ * Analysis: Properly detect circular references to the bytecode of other contracts across all function calls.
+ * Commandline Interface: Model checker option ``--model-checker-targets`` also accepts ``outOfBounds``.
+ * Commandline Interface: New model checker option ``--model-checker-contracts`` allows users to select which contracts should be analyzed as the most derived.
+ * Low-Level Inliner: Inline ordinary jumps to small blocks and jumps to small blocks that terminate.
+ * NatSpec: Allow ``@notice`` tag on non-public state variables and local variable declarations. The documentation will only be part of the AST, under the field ``documentation``.
+ * SMTChecker: Deprecate ``pragma experimental SMTChecker;`` and set default model checker engine to ``none``.
+ * SMTChecker: Report local variables in CHC counterexamples.
+ * SMTChecker: Report out of bounds index access for arrays and fixed bytes.
+ * SMTChecker: Support file level functions and constants.
+ * Standard JSON: Model checker option ``settings.modelChecker.targets`` also accepts ``outOfBounds``.
+ * Standard JSON: Model checker option ``settings.modelChecker.targets`` takes an array of string targets instead of string of comma separated targets.
+ * Standard JSON: New model checker option ``settings.modelChecker.contracts`` allows users to select which contracts should be analyzed as the most derived.
+ * Yul EVM Code Transform: Stack Optimization: Reuse slots of unused function arguments and defer allocating stack slots for return variables until after expression statements and assignments that do not reference them.
+ * Yul Optimizer: Added a new step FunctionSpecializer, that specializes a function with its literal arguments.
+
+
+Bugfixes:
+ * Antlr Grammar: Fix parsing of import paths involving properly distinguishing between empty and non-empty string literals in general.
+ * AST Output: Fix ``kind`` field of ``ModifierInvocation`` for base constructor calls.
+ * Commandline interface: Fix internal error when printing AST and using ``--base-path`` or ``file://`` prefix in imports.
+ * Commandline interface: Fix standard input bypassing allowed path checks.
+ * Natspec: Fix internal error related to the `@returns` documentation for a public state variable overriding a function.
+ * SMTChecker: Fix false positive and false negative on ``push`` as LHS of a compound assignment.
+ * SMTChecker: Fix false positive in contracts that cannot be deployed.
+ * SMTChecker: Fix internal error on public getter returning dynamic data on older EVM versions where these are not available.
+ * SMTChecker: Fix internal error on try-catch with function call in catch block.
+ * Type Checker: Fix missing error when events are used without an emit statement.
+
+
+AST Changes:
+ * New property for ``ContractDefinition`` nodes: ``usedErrors`` lists AST IDs of all errors used by the contract (even if defined outside).
+
+
+
+### 0.8.3 (2021-03-23)
+
+Important Bugfixes:
+ * Optimizer: Fix bug on incorrect caching of Keccak-256 hashes.
+
+Compiler Features:
+ * Command Line Interface: Drop experimental support for ``--machine evm15``.
+ * Optimizer: Try to move ``and`` with constant inside ``or`` to improve storage writes of small types.
+ * Optimizer: Replace multiplications and divisions with powers of two by shifts.
+
+Bugfixes:
+ * AST Import: For constructors, a public visibility is ignored during importing.
+ * Error Reporter: Fix handling of carriage return.
+ * SMTChecker: Fix internal error in BMC on resolving virtual functions inside branches.
+ * SMTChecker: Fix internal error on ``array.pop`` nested inside 1-tuple.
+ * SMTChecker: Fix internal error on ``FixedBytes`` constant initialized with string literal.
+ * SMTChecker: Fix internal error on array slices.
+ * SMTChecker: Fix internal error on calling public getter on a state variable of type array (possibly nested) of structs.
+ * SMTChecker: Fix internal error on pushing to ``string`` casted to ``bytes``.
+ * SMTChecker: Fix bug in virtual functions called by constructors.
+
+AST Changes:
+ * ModifierInvocation: Add ``kind`` field which can be ``modifierInvocation`` or ``baseConstructorSpecifier``.
+
+
 ### 0.8.2 (2021-03-02)
 
 Compiler Features:

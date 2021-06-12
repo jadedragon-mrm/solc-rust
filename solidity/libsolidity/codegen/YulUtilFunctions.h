@@ -81,6 +81,10 @@ public:
 	/// signature: (memPtr) ->
 	std::string storeLiteralInMemoryFunction(std::string const& _literal);
 
+	/// @returns the name of a function that stores a string literal at a specific location in storage
+	/// signature: (slot) ->
+	std::string copyLiteralToStorageFunction(std::string const& _literal);
+
 	// @returns the name of a function that has the equivalent logic of an
 	// `assert` or `require` call.
 	std::string requireOrAssertFunction(bool _assert, Type const* _messageType = nullptr);
@@ -126,8 +130,15 @@ public:
 
 	/// @returns the name of a function that rounds its input to the next multiple
 	/// of 32 or the input if it is a multiple of 32.
+	/// Ignores overflow.
 	/// signature: (value) -> result
 	std::string roundUpFunction();
+
+	/// @returns the name of a function that divides by 32 and rounds up during the division.
+	/// In other words, on input x it returns the smallest y such that y * 32 >= x.
+	/// Ignores overflow.
+	/// signature: (x) -> y
+	std::string divide32CeilFunction();
 
 	/// signature: (x, y) -> sum
 	std::string overflowCheckedIntAddFunction(IntegerType const& _type);
@@ -207,6 +218,11 @@ public:
 	/// signature: (array, newLen)
 	std::string resizeArrayFunction(ArrayType const& _type);
 
+	/// @returns the name of a function that zeroes all storage array elements from `startIndex` to `len` (excluding).
+	/// Assumes that `len` is the array length. Does nothing if `startIndex >= len`. Does not modify the stored length.
+	/// signature: (array, len, startIndex)
+	std::string cleanUpStorageArrayEndFunction(ArrayType const& _type);
+
 	/// @returns the name of a function that reduces the size of a storage array by one element
 	/// signature: (array)
 	std::string storageArrayPopFunction(ArrayType const& _type);
@@ -215,7 +231,7 @@ public:
 /// @param _fromType represents the type of the element being pushed.
 /// If _fromType is ReferenceType the function will perform deep copy.
 	/// signature: (array, value)
-	std::string storageArrayPushFunction(ArrayType const& _type, TypePointer _fromType = nullptr);
+	std::string storageArrayPushFunction(ArrayType const& _type, Type const* _fromType = nullptr);
 
 	/// @returns the name of a function that pushes the base type's zero element to a storage array and returns storage slot and offset of the added element.
 	/// signature: (array) -> slot, offset
@@ -291,6 +307,10 @@ public:
 	/// @returns the name of a function that allocates a memory array and copies the contents
 	/// of the storage array into it.
 	std::string copyArrayFromStorageToMemoryFunction(ArrayType const& _from, ArrayType const& _to);
+
+	/// @returns the name of a function that does concatenation of variadic number of bytes
+	/// or fixed bytes
+	std::string bytesConcatFunction(std::vector<Type const*> const& _argumentTypes);
 
 	/// @returns the name of a function that performs index access for mappings.
 	/// @param _mappingType the type of the mapping
@@ -407,6 +427,10 @@ public:
 	/// This is used for data being encoded or general type conversions in the code.
 	std::string conversionFunction(Type const& _from, Type const& _to);
 
+	/// @returns the name of a function that converts bytes array to fixed bytes type
+	/// signature: (array) -> value
+	std::string bytesToFixedBytesConversionFunction(ArrayType const& _from, FixedBytesType const& _to);
+
 	/// @returns the name of the cleanup function for the given type and
 	/// adds its implementation to the requested functions.
 	/// The cleanup function defers to the validator function with "assert"
@@ -445,12 +469,18 @@ public:
 	/// signature: (slot, offset) ->
 	std::string storageSetToZeroFunction(Type const& _type);
 
-	/// If revertStrings is debug, @returns inline assembly code that
+	/// If revertStrings is debug, @returns the name of a function that
 	/// stores @param _message in memory position 0 and reverts.
-	/// Otherwise returns "revert(0, 0)".
-	static std::string revertReasonIfDebug(RevertStrings revertStrings, std::string const& _message = "");
+	/// Otherwise returns the name of a function that uses "revert(0, 0)".
+	std::string revertReasonIfDebugFunction(std::string const& _message = "");
 
-	std::string revertReasonIfDebug(std::string const& _message = "");
+	/// @returns the function body of ``revertReasonIfDebug``.
+	/// Should only be used internally and by the old code generator.
+	static std::string revertReasonIfDebugBody(
+		RevertStrings _revertStrings,
+		std::string const& _allocation,
+		std::string const& _message
+	);
 
 	/// Reverts with ``Panic(uint256)`` and the given code.
 	std::string panicFunction(util::PanicCode _code);
@@ -529,6 +559,14 @@ private:
 	/// signature: (array, newLen)
 	std::string resizeDynamicByteArrayFunction(ArrayType const& _type);
 
+	/// @returns the name of a function that cleans up elements of a storage byte array starting from startIndex.
+	/// It will not copy elements in case of transformation to short byte array, and will not change array length.
+	/// In case of startIndex is greater than len, doesn't do anything.
+	/// In case of short byte array (< 32 bytes) doesn't do anything.
+	/// If the first slot to be cleaned up is partially occupied, does not touch it. Cleans up only completely unused slots.
+	/// signature: (array, len, startIndex)
+	std::string cleanUpDynamicByteArrayEndSlotsFunction(ArrayType const& _type);
+
 	/// @returns the name of a function that increases size of byte array
 	/// when we resize byte array frextractUsedSetLenom < 32 elements to >= 32 elements or we push to byte array of size 31 copying of data will  occur
 	/// signature: (array, data, oldLen, newLen)
@@ -547,6 +585,11 @@ private:
 	/// @returns the name of a function that extracts only used part of slot that represents short byte array
 	/// signature: (data, len) -> data
 	std::string shortByteArrayEncodeUsedAreaSetLengthFunction();
+
+	/// @returns the name of a function that calculates slot and offset for index
+	/// Doesn't perform length checks, assumes that index is in bounds
+	/// signature: (array, index)
+	std::string longByteArrayStorageIndexAccessNoCheckFunction();
 
 	langutil::EVMVersion m_evmVersion;
 	RevertStrings m_revertStrings;

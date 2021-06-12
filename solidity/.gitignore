@@ -1,4 +1,4 @@
-#commit_hash.txt
+commit_hash.txt
 prerelease.txt
 
 # Compiled Object files
@@ -60,4 +60,3 @@ CMakeLists.txt.user
 
 # place to put local temporary files
 tmp
-/.directory

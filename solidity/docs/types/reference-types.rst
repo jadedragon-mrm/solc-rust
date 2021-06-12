@@ -136,8 +136,8 @@ a reference to it.
 
 .. _bytes:
 
-``bytes`` and ``strings`` as Arrays
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+``bytes`` and ``string`` as Arrays
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Variables of type ``bytes`` and ``string`` are special arrays. A ``bytes`` is similar to ``byte[]``,
 but it is packed tightly in calldata and memory. ``string`` is equal to ``bytes`` but does not allow
@@ -146,7 +146,7 @@ length or index access.
 Solidity does not have string manipulation functions, but there are
 third-party string libraries. You can also compare two strings by their keccak256-hash using
 ``keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2))`` and
-concatenate two strings using ``abi.encodePacked(s1, s2)``.
+concatenate two strings using ``bytes.concat(bytes(s1), bytes(s2))``.
 
 You should use ``bytes`` over ``byte[]`` because it is cheaper,
 since ``byte[]`` adds 31 padding bytes between the elements. As a general rule,
@@ -160,6 +160,32 @@ always use one of the value types ``bytes1`` to ``bytes32`` because they are muc
     that you are accessing the low-level bytes of the UTF-8 representation,
     and not the individual characters.
 
+.. index:: ! bytes-concat
+
+.. _bytes-concat:
+
+``bytes.concat`` function
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can concatenate a variable number of ``bytes`` or ``bytes1 ... bytes32`` using ``bytes.concat``.
+The function returns a single ``bytes memory`` array that contains the contents of the arguments without padding.
+If you want to use string parameters or other types, you need to convert them to ``bytes`` or ``bytes1``/.../``bytes32`` first.
+
+::
+
+    // SPDX-License-Identifier: GPL-3.0
+    pragma solidity ^0.8.4;
+
+    contract C {
+        bytes s = "Storage";
+        function f(bytes calldata c, string memory m, bytes16 b) public view {
+            bytes memory a = bytes.concat(s, c, c[:2], "Literal", bytes(m), b);
+            assert((s.length + c.length + 2 + 7 + bytes(m).length + 16) == a.length);
+        }
+    }
+
+If you call ``bytes.concat`` without arguments it will return an empty ``bytes`` array.
+
 .. index:: ! array;allocating, new
 
 Allocating Memory Arrays
@@ -170,6 +196,9 @@ As opposed to storage arrays, it is **not** possible to resize memory arrays (e.
 the ``.push`` member functions are not available).
 You either have to calculate the required size in advance
 or create a new memory array and copy every element.
+
+As all variables in Solidity, the elements of newly allocated arrays are always initialized
+with the :ref:`default value<default-value>`.
 
 ::
 
@@ -463,7 +492,7 @@ Array slices are useful to ABI-decode secondary data passed in function paramete
 ::
 
     // SPDX-License-Identifier: GPL-3.0
-    pragma solidity >=0.7.0 <0.9.0;
+    pragma solidity >0.8.4 <0.9.0;
     contract Proxy {
         /// @dev Address of the client contract managed by proxy i.e., this contract
         address client;
@@ -475,13 +504,9 @@ Array slices are useful to ABI-decode secondary data passed in function paramete
         /// Forward call to "setOwner(address)" that is implemented by client
         /// after doing basic validation on the address argument.
         function forward(bytes calldata _payload) external {
-            // Since ABI decoding requires padded data, we cannot
-            // use abi.decode(_payload[:4], (bytes4)).
-            bytes4 sig =
-                _payload[0] |
-                (bytes4(_payload[1]) >> 8) |
-                (bytes4(_payload[2]) >> 16) |
-                (bytes4(_payload[3]) >> 24);
+            bytes4 sig = bytes4(_payload[:4]);
+            // Due to truncating behaviour, bytes4(_payload) performs identically.
+            // bytes4 sig = bytes4(_payload);
             if (sig == bytes4(keccak256("setOwner(address)"))) {
                 address owner = abi.decode(_payload[4:], (address));
                 require(owner != address(0), "Address of owner cannot be zero.");

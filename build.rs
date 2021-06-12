@@ -12,7 +12,7 @@ fn main() {
         .define("TOOLS", "OFF")
         .define("USE_Z3", "OFF")
         .define("USE_CVC4", "OFF")
-        .define("Boost_USE_STATIC_LIBS",  "OFF")
+        .define("Boost_USE_STATIC_LIBS",  "ON")
         .build();
 
     /*for lib in vec!["solc", "solidity", "yul", "langutil", "evmasm", "solutil", "smtutil"] {

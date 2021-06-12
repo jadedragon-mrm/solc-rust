@@ -30,7 +30,7 @@
 #include <libsolutil/Whiskers.h>
 #include <libsolutil/StringUtils.h>
 
-#include <boost/range/adaptor/map.hpp>
+#include <range/v3/view/map.hpp>
 
 using namespace std;
 using namespace solidity;
@@ -133,7 +133,7 @@ void IRGenerationContext::initializeInternalDispatch(InternalDispatchMap _intern
 {
 	solAssert(internalDispatchClean(), "");
 
-	for (DispatchSet const& functions: _internalDispatch | boost::adaptors::map_values)
+	for (DispatchSet const& functions: _internalDispatch | ranges::views::values)
 		for (auto function: functions)
 			enqueueFunctionForCodeGeneration(*function);
 
@@ -176,9 +176,4 @@ YulUtilFunctions IRGenerationContext::utils()
 ABIFunctions IRGenerationContext::abiFunctions()
 {
 	return ABIFunctions(m_evmVersion, m_revertStrings, m_functions);
-}
-
-std::string IRGenerationContext::revertReasonIfDebug(std::string const& _message)
-{
-	return YulUtilFunctions::revertReasonIfDebug(m_revertStrings, _message);
 }

@@ -24,12 +24,10 @@
 #include <libsolidity/ast/ASTJsonImporter.h>
 
 #include <libyul/AsmJsonImporter.h>
-#include <libyul/AsmParser.h>
 #include <libyul/AST.h>
 #include <libyul/Dialect.h>
 #include <libyul/backends/evm/EVMDialect.h>
 
-#include <liblangutil/ErrorReporter.h>
 #include <liblangutil/Exceptions.h>
 #include <liblangutil/Scanner.h>
 #include <liblangutil/SourceLocation.h>
@@ -151,6 +149,8 @@ ASTPointer<ASTNode> ASTJsonImporter::convertJsonToASTNode(Json::Value const& _js
 		return createModifierInvocation(_json);
 	if (nodeType == "EventDefinition")
 		return createEventDefinition(_json);
+	if (nodeType == "ErrorDefinition")
+		return createErrorDefinition(_json);
 	if (nodeType == "ElementaryTypeName")
 		return createElementaryTypeName(_json);
 	if (nodeType == "UserDefinedTypeName")
@@ -189,6 +189,8 @@ ASTPointer<ASTNode> ASTJsonImporter::convertJsonToASTNode(Json::Value const& _js
 		return createReturn(_json);
 	if (nodeType == "EmitStatement")
 		return createEmitStatement(_json);
+	if (nodeType == "RevertStatement")
+		return createRevertStatement(_json);
 	if (nodeType == "Throw")
 		return createThrow(_json);
 	if (nodeType == "VariableDeclarationStatement")
@@ -440,7 +442,10 @@ ASTPointer<FunctionDefinition> ASTJsonImporter::createFunctionDefinition(Json::V
 		modifiers.push_back(createModifierInvocation(mod));
 
 	Visibility vis = Visibility::Default;
-	if (!freeFunction)
+	// Ignore public visibility for constructors
+	if (kind == Token::Constructor)
+		vis = (visibility(_node) == Visibility::Public) ? Visibility::Default : visibility(_node);
+	else if (!freeFunction)
 		vis = visibility(_node);
 	return createASTNode<FunctionDefinition>(
 		_node,
@@ -533,6 +538,17 @@ ASTPointer<EventDefinition> ASTJsonImporter::createEventDefinition(Json::Value c
 		_node["documentation"].isNull() ? nullptr : createDocumentation(member(_node, "documentation")),
 		createParameterList(member(_node, "parameters")),
 		memberAsBool(_node, "anonymous")
+	);
+}
+
+ASTPointer<ErrorDefinition> ASTJsonImporter::createErrorDefinition(Json::Value const&  _node)
+{
+	return createASTNode<ErrorDefinition>(
+		_node,
+		memberAsASTString(_node, "name"),
+		createNameSourceLocation(_node),
+		_node["documentation"].isNull() ? nullptr : createDocumentation(member(_node, "documentation")),
+		createParameterList(member(_node, "parameters"))
 	);
 }
 
@@ -728,6 +744,15 @@ ASTPointer<EmitStatement> ASTJsonImporter::createEmitStatement(Json::Value const
 		_node,
 		nullOrASTString(_node, "documentation"),
 		createFunctionCall(member(_node, "eventCall"))
+	);
+}
+
+ASTPointer<RevertStatement> ASTJsonImporter::createRevertStatement(Json::Value const&  _node)
+{
+	return createASTNode<RevertStatement>(
+		_node,
+		nullOrASTString(_node, "documentation"),
+		createFunctionCall(member(_node, "errorCall"))
 	);
 }
 

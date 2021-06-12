@@ -12,7 +12,7 @@ Creating and verifying signatures
 =================================
 
 Imagine Alice wants to send a quantity of Ether to Bob, i.e.
-Alice is the sender and the Bob is the recipient.
+Alice is the sender and Bob is the recipient.
 
 Alice only needs to send cryptographically signed messages off-chain
 (e.g. via email) to Bob and it is similar to writing checks.
@@ -431,7 +431,7 @@ The full contract
 .. note::
   The function ``splitSignature`` does not use all security
   checks. A real implementation should use a more rigorously tested library,
-  such as openzepplin's `version  <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/cryptography/ECDSA.sol>`_ of this code.
+  such as openzepplin's `version  <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/ECDSA.sol>`_ of this code.
 
 Verifying Payments
 ------------------
@@ -445,7 +445,7 @@ in the end.
 
 The recipient should verify each message using the following process:
 
-    1. Verify that the contact address in the message matches the payment channel.
+    1. Verify that the contract address in the message matches the payment channel.
     2. Verify that the new total is the expected amount.
     3. Verify that the new total does not exceed the amount of Ether escrowed.
     4. Verify that the signature is valid and comes from the payment channel sender.

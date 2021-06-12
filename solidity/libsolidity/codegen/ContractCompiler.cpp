@@ -49,7 +49,7 @@
 #include <libsolutil/Whiskers.h>
 #include <libsolutil/FunctionSelector.h>
 
-#include <boost/range/adaptor/reversed.hpp>
+#include <range/v3/view/reverse.hpp>
 
 #include <algorithm>
 
@@ -152,9 +152,7 @@ void ContractCompiler::appendInitAndConstructorCode(ContractDefinition const& _c
 	m_baseArguments = &_contract.annotation().baseConstructorArguments;
 
 	// Initialization of state variables in base-to-derived order.
-	for (ContractDefinition const* contract: boost::adaptors::reverse(
-		_contract.annotation().linearizedBaseContracts
-	))
+	for (ContractDefinition const* contract: _contract.annotation().linearizedBaseContracts | ranges::views::reverse)
 		initializeStateVariables(*contract);
 
 	if (FunctionDefinition const* constructor = _contract.constructor())
@@ -200,10 +198,10 @@ size_t ContractCompiler::packIntoContractCreator(ContractDefinition const& _cont
 	m_context.pushSubroutineOffset(m_context.runtimeSub());
 	m_context << u256(0) << Instruction::CODECOPY;
 	// Assign immutable values from stack in reversed order.
-	for (auto const& immutable: immutables | boost::adaptors::reversed)
+	for (auto const& immutable: immutables | ranges::views::reverse)
 	{
 		auto slotNames = m_context.immutableVariableSlotNames(*immutable);
-		for (auto&& slotName: slotNames | boost::adaptors::reversed)
+		for (auto&& slotName: slotNames | ranges::views::reverse)
 		{
 			m_context << u256(0);
 			m_context.appendImmutableAssignment(slotName);
@@ -239,15 +237,18 @@ size_t ContractCompiler::deployLibrary(ContractDefinition const& _contract)
 			codecopy(codepos, subOffset, subSize)
 			// Check that the first opcode is a PUSH20
 			if iszero(eq(0x73, byte(0, mload(codepos)))) {
-				mstore(0, <panicSig>)
-				mstore(4, 0)
+				mstore(0, <panicSelector>)
+				mstore(4, <panicCode>)
 				revert(0, 0x24)
 			}
 			mstore(0, address())
 			mstore8(codepos, 0x73)
 			return(codepos, subSize)
 		}
-		)")("panicSig", util::selectorFromSignature("Panic(uint256)").str()).render(),
+		)")
+		("panicSelector", util::selectorFromSignature("Panic(uint256)").str())
+		("panicCode", "0")
+		.render(),
 		{"subSize", "subOffset"}
 	);
 
@@ -603,6 +604,8 @@ bool ContractCompiler::visit(VariableDeclaration const& _variableDeclaration)
 
 bool ContractCompiler::visit(FunctionDefinition const& _function)
 {
+	solAssert(_function.isImplemented(), "");
+
 	CompilerContext::LocationSetter locationSetter(m_context, _function);
 
 	m_context.startFunction(_function);
@@ -739,7 +742,7 @@ bool ContractCompiler::visit(InlineAssembly const& _inlineAssembly)
 					}
 					else if (Literal const* literal = dynamic_cast<Literal const*>(variable->value().get()))
 					{
-						TypePointer type = literal->annotation().type;
+						Type const* type = literal->annotation().type;
 
 						switch (type->category())
 						{
@@ -857,12 +860,6 @@ bool ContractCompiler::visit(InlineAssembly const& _inlineAssembly)
 				);
 				solAssert(variable->type()->sizeOnStack() == 1, "");
 				solAssert(suffix == "slot", "");
-				if (stackDiff > 16 || stackDiff < 1)
-					BOOST_THROW_EXCEPTION(
-						StackTooDeepError() <<
-						errinfo_sourceLocation(_inlineAssembly.location()) <<
-						errinfo_comment("Stack too deep(" + to_string(stackDiff) + "), try removing local variables.")
-					);
 			}
 			else if (variable->type()->dataStoredIn(DataLocation::CallData))
 			{
@@ -879,6 +876,12 @@ bool ContractCompiler::visit(InlineAssembly const& _inlineAssembly)
 			else
 				solAssert(suffix.empty(), "");
 
+			if (stackDiff > 16 || stackDiff < 1)
+				BOOST_THROW_EXCEPTION(
+					StackTooDeepError() <<
+					errinfo_sourceLocation(_inlineAssembly.location()) <<
+					errinfo_comment("Stack too deep(" + to_string(stackDiff) + "), try removing local variables.")
+				);
 			_assembly.appendInstruction(swapInstruction(stackDiff));
 			_assembly.appendInstruction(Instruction::POP);
 		}
@@ -949,7 +952,7 @@ bool ContractCompiler::visit(TryStatement const& _tryStatement)
 		TryCatchClause const& successClause = *_tryStatement.clauses().front();
 		if (successClause.parameters())
 		{
-			vector<TypePointer> exprTypes{_tryStatement.externalCall().annotation().type};
+			vector<Type const*> exprTypes{_tryStatement.externalCall().annotation().type};
 			if (auto tupleType = dynamic_cast<TupleType const*>(exprTypes.front()))
 				exprTypes = tupleType->components();
 			vector<ASTPointer<VariableDeclaration>> const& params = successClause.parameters()->parameters();
@@ -1096,7 +1099,7 @@ bool ContractCompiler::visit(TryCatchClause const& _clause)
 	unsigned varSize = 0;
 
 	if (_clause.parameters())
-		for (ASTPointer<VariableDeclaration> const& varDecl: _clause.parameters()->parameters() | boost::adaptors::reversed)
+		for (ASTPointer<VariableDeclaration> const& varDecl: _clause.parameters()->parameters() | ranges::views::reverse)
 		{
 			solAssert(varDecl, "");
 			varSize += varDecl->annotation().type->sizeOnStack();
@@ -1251,14 +1254,14 @@ bool ContractCompiler::visit(Return const& _return)
 		for (auto const& retVariable: returnParameters)
 			types.push_back(retVariable->annotation().type);
 
-		TypePointer expectedType;
+		Type const* expectedType;
 		if (expression->annotation().type->category() == Type::Category::Tuple || types.size() != 1)
 			expectedType = TypeProvider::tuple(move(types));
 		else
 			expectedType = types.front();
 		compileExpression(*expression, expectedType);
 
-		for (auto const& retVariable: boost::adaptors::reverse(returnParameters))
+		for (auto const& retVariable: returnParameters | ranges::views::reverse)
 			CompilerUtils(m_context).moveToStackVariable(*retVariable);
 	}
 
@@ -1277,6 +1280,15 @@ bool ContractCompiler::visit(EmitStatement const& _emit)
 	CompilerContext::LocationSetter locationSetter(m_context, _emit);
 	StackHeightChecker checker(m_context);
 	compileExpression(_emit.eventCall());
+	checker.check();
+	return false;
+}
+
+bool ContractCompiler::visit(RevertStatement const& _revert)
+{
+	CompilerContext::LocationSetter locationSetter(m_context, _revert);
+	StackHeightChecker checker(m_context);
+	compileExpression(_revert.errorCall());
 	checker.check();
 	return false;
 }
@@ -1344,6 +1356,7 @@ bool ContractCompiler::visit(PlaceholderStatement const& _placeholderStatement)
 
 bool ContractCompiler::visit(Block const& _block)
 {
+	m_context.pushVisitedNodes(&_block);
 	if (_block.unchecked())
 	{
 		solAssert(m_context.arithmetic() == Arithmetic::Checked, "");
@@ -1362,6 +1375,7 @@ void ContractCompiler::endVisit(Block const& _block)
 	}
 	// Frees local variables declared in the scope of this block.
 	popScopedVariables(&_block);
+	m_context.popVisitedNodes();
 }
 
 void ContractCompiler::appendMissingFunctions()
@@ -1470,7 +1484,7 @@ void ContractCompiler::appendStackVariableInitialisation(
 		CompilerUtils(m_context).pushZeroValue(*_variable.annotation().type);
 }
 
-void ContractCompiler::compileExpression(Expression const& _expression, TypePointer const& _targetType)
+void ContractCompiler::compileExpression(Expression const& _expression, Type const* _targetType)
 {
 	ExpressionCompiler expressionCompiler(m_context, m_optimiserSettings.runOrderLiterals);
 	expressionCompiler.compile(_expression);

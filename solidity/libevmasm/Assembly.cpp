@@ -33,8 +33,10 @@
 
 #include <liblangutil/Exceptions.h>
 
-#include <fstream>
 #include <json/json.h>
+
+#include <fstream>
+#include <range/v3/algorithm/any_of.hpp>
 
 using namespace std;
 using namespace solidity;
@@ -317,6 +319,9 @@ Json::Value Assembly::assemblyJSON(map<string, unsigned> const& _sourceIndices) 
 		case PushData:
 			collection.append(createJsonValue("PUSH data", sourceIndex, i.location().start, i.location().end, toStringInHex(i.data())));
 			break;
+		case VerbatimBytecode:
+			collection.append(createJsonValue("VERBATIM", sourceIndex, i.location().start, i.location().end, toHex(i.verbatimData())));
+			break;
 		default:
 			assertThrow(false, InvalidOpcode, "");
 		}
@@ -343,12 +348,18 @@ Json::Value Assembly::assemblyJSON(map<string, unsigned> const& _sourceIndices) 
 	return root;
 }
 
-AssemblyItem Assembly::namedTag(string const& _name)
+AssemblyItem Assembly::namedTag(string const& _name, size_t _params, size_t _returns, optional<uint64_t> _sourceID)
 {
 	assertThrow(!_name.empty(), AssemblyException, "Empty named tag.");
-	if (!m_namedTags.count(_name))
-		m_namedTags[_name] = static_cast<size_t>(newTag().data());
-	return AssemblyItem{Tag, m_namedTags.at(_name)};
+	if (m_namedTags.count(_name))
+	{
+		assertThrow(m_namedTags.at(_name).params == _params, AssemblyException, "");
+		assertThrow(m_namedTags.at(_name).returns == _returns, AssemblyException, "");
+		assertThrow(m_namedTags.at(_name).sourceID == _sourceID, AssemblyException, "");
+	}
+	else
+		m_namedTags[_name] = {static_cast<size_t>(newTag().data()), _sourceID, _params, _returns};
+	return AssemblyItem{Tag, m_namedTags.at(_name).id};
 }
 
 AssemblyItem Assembly::newPushLibraryAddress(string const& _identifier)
@@ -482,7 +493,9 @@ map<u256, u256> Assembly::optimiseInternal(
 			// function types that can be stored in storage.
 			AssemblyItems optimisedItems;
 
-			bool usesMSize = (find(m_items.begin(), m_items.end(), AssemblyItem{Instruction::MSIZE}) != m_items.end());
+			bool usesMSize = ranges::any_of(m_items, [](AssemblyItem const& _i) {
+				return _i == AssemblyItem{Instruction::MSIZE} || _i.type() == VerbatimBytecode;
+			});
 
 			auto iter = m_items.begin();
 			while (iter != m_items.end())
@@ -682,6 +695,9 @@ LinkerObject const& Assembly::assemble() const
 			ret.immutableReferences[i.data()].second.emplace_back(ret.bytecode.size());
 			ret.bytecode.resize(ret.bytecode.size() + 32);
 			break;
+		case VerbatimBytecode:
+			ret.bytecode += i.verbatimData();
+			break;
 		case AssignImmutable:
 		{
 			auto const& offsets = immutableReferencesBySub[i.data()].second;
@@ -712,13 +728,16 @@ LinkerObject const& Assembly::assemble() const
 			ret.bytecode.resize(ret.bytecode.size() + 20);
 			break;
 		case Tag:
+		{
 			assertThrow(i.data() != 0, AssemblyException, "Invalid tag position.");
 			assertThrow(i.splitForeignPushTag().first == numeric_limits<size_t>::max(), AssemblyException, "Foreign tag.");
+			size_t tagId = static_cast<size_t>(i.data());
 			assertThrow(ret.bytecode.size() < 0xffffffffL, AssemblyException, "Tag too large.");
-			assertThrow(m_tagPositionsInBytecode[static_cast<size_t>(i.data())] == numeric_limits<size_t>::max(), AssemblyException, "Duplicate tag position.");
-			m_tagPositionsInBytecode[static_cast<size_t>(i.data())] = ret.bytecode.size();
+			assertThrow(m_tagPositionsInBytecode[tagId] == numeric_limits<size_t>::max(), AssemblyException, "Duplicate tag position.");
+			m_tagPositionsInBytecode[tagId] = ret.bytecode.size();
 			ret.bytecode.push_back(static_cast<uint8_t>(Instruction::JUMPDEST));
 			break;
+		}
 		default:
 			assertThrow(false, InvalidOpcode, "Unexpected opcode while assembling.");
 		}
@@ -760,6 +779,17 @@ LinkerObject const& Assembly::assemble() const
 		bytesRef r(ret.bytecode.data() + i.first, bytesPerTag);
 		toBigEndian(pos, r);
 	}
+	for (auto const& [name, tagInfo]: m_namedTags)
+	{
+		size_t position = m_tagPositionsInBytecode.at(tagInfo.id);
+		ret.functionDebugData[name] = {
+			position == numeric_limits<size_t>::max() ? nullopt : optional<size_t>{position},
+			tagInfo.sourceID,
+			tagInfo.params,
+			tagInfo.returns
+		};
+	}
+
 	for (auto const& dataItem: m_data)
 	{
 		auto references = dataRef.equal_range(dataItem.first);

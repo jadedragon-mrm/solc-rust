@@ -33,7 +33,7 @@ the team and contributors are working on, you can join our public team calls:
 - Mondays at 3pm CET/CEST.
 - Wednesdays at 2pm CET/CEST.
 
-Both calls take place on `Google Meet <https://meet.google.com/mrq-kbwv-edg>`_.
+Both calls take place on `Jitsi <https://meet.komputing.org/solidity>`_.
 
 How to Report Issues
 ====================
@@ -112,7 +112,7 @@ starting from the current directory. The required file is called ``libevmone.so`
 ``evmone.dll`` on Windows systems and ``libevmone.dylib`` on macOS. If it is not found, tests that
 use it are skipped. These tests are ``libsolididty/semanticTests``, ``libsolidity/GasCosts``,
 ``libsolidity/SolidityEndToEndTest``, part of the soltest suite. To run all tests, download the library from
-`GitHub <https://github.com/ethereum/evmone/releases/tag/v0.4.1>`_
+`GitHub <https://github.com/ethereum/evmone/releases/tag/v0.7.0>`_
 and place it in the project root path or inside the ``deps`` folder.
 
 If the ``libz3`` library is not installed on your system, you should disable the
@@ -388,7 +388,8 @@ local slang and references, making your language as clear to all readers as poss
 .. note::
 
     While the official Solidity documentation is written in English, there are community contributed :ref:`translations`
-    in other languages available.
+    in other languages available. Please refer to the `translation guide <https://github.com/solidity-docs/translation-guide>`_
+    for information on how to contribute to the community translations.
 
 Title Case for Headings
 -----------------------

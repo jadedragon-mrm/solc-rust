@@ -70,6 +70,11 @@ public:
 	/// the constructor.
 	std::vector<std::string> unhandledQueries() const;
 
+	enum class CHCNatspecOption
+	{
+		AbstractFunctionNondet
+	};
+
 private:
 	/// Visitor functions.
 	//@{
@@ -77,14 +82,19 @@ private:
 	void endVisit(ContractDefinition const& _node) override;
 	bool visit(FunctionDefinition const& _node) override;
 	void endVisit(FunctionDefinition const& _node) override;
+	bool visit(Block const& _block) override;
+	void endVisit(Block const& _block) override;
 	bool visit(IfStatement const& _node) override;
 	bool visit(WhileStatement const&) override;
 	bool visit(ForStatement const&) override;
+	void endVisit(ForStatement const&) override;
 	void endVisit(FunctionCall const& _node) override;
 	void endVisit(Break const& _node) override;
 	void endVisit(Continue const& _node) override;
 	void endVisit(IndexRangeAccess const& _node) override;
 	void endVisit(Return const& _node) override;
+	bool visit(TryCatchClause const&) override;
+	void endVisit(TryCatchClause const&) override;
 	bool visit(TryStatement const& _node) override;
 
 	void pushInlineFrame(CallableDeclaration const& _callable) override;
@@ -97,12 +107,13 @@ private:
 	void externalFunctionCallToTrustedCode(FunctionCall const& _funCall);
 	void unknownFunctionCall(FunctionCall const& _funCall);
 	void makeArrayPopVerificationTarget(FunctionCall const& _arrayPop) override;
+	void makeOutOfBoundsVerificationTarget(IndexAccess const& _access) override;
 	/// Creates underflow/overflow verification targets.
 	std::pair<smtutil::Expression, smtutil::Expression> arithmeticOperation(
 		Token _op,
 		smtutil::Expression const& _left,
 		smtutil::Expression const& _right,
-		TypePointer const& _commonType,
+		Type const* _commonType,
 		Expression const& _expression
 	) override;
 	//@}
@@ -115,6 +126,19 @@ private:
 	void clearIndices(ContractDefinition const* _contract, FunctionDefinition const* _function = nullptr) override;
 	void setCurrentBlock(Predicate const& _block);
 	std::set<unsigned> transactionVerificationTargetsIds(ASTNode const* _txRoot);
+	//@}
+
+	/// SMT Natspec and abstraction helpers.
+	//@{
+	/// @returns a CHCNatspecOption enum if _option is a valid SMTChecker Natspec value
+	/// or nullopt otherwise.
+	static std::optional<CHCNatspecOption> natspecOptionFromString(std::string const& _option);
+	/// @returns which SMTChecker options are enabled by @a _function's Natspec via
+	/// `@custom:smtchecker <option>` or nullopt if none is used.
+	std::set<CHCNatspecOption> smtNatspecTags(FunctionDefinition const& _function);
+	/// @returns true if _function is Natspec annotated to be abstracted by
+	/// nondeterministic values.
+	bool abstractAsNondet(FunctionDefinition const& _function);
 	//@}
 
 	/// Sort helpers.
@@ -135,7 +159,7 @@ private:
 	/// Creates a CHC system that, for a given contract,
 	/// - initializes its state variables (as 0 or given value, if any).
 	/// - "calls" the explicit constructor function of the contract, if any.
-	void defineContractInitializer(ContractDefinition const& _contract);
+	void defineContractInitializer(ContractDefinition const& _contract, ContractDefinition const& _contractContext);
 
 	/// Interface predicate over current variables.
 	smtutil::Expression interface();
@@ -177,14 +201,17 @@ private:
 	std::vector<smtutil::Expression> currentStateVariables();
 	std::vector<smtutil::Expression> currentStateVariables(ContractDefinition const& _contract);
 
+	/// @returns \bigwedge currentValue(_vars[i]) == initialState(_var[i])
+	smtutil::Expression currentEqualInitialVarsConstraints(std::vector<VariableDeclaration const*> const& _vars) const;
+
 	/// @returns the predicate name for a given node.
 	std::string predicateName(ASTNode const* _node, ContractDefinition const* _contract = nullptr);
 	/// @returns a predicate application after checking the predicate's type.
 	smtutil::Expression predicate(Predicate const& _block);
 	/// @returns the summary predicate for the called function.
 	smtutil::Expression predicate(FunctionCall const& _funCall);
-	/// @returns a predicate that defines a contract initializer.
-	smtutil::Expression initializer(ContractDefinition const& _contract);
+	/// @returns a predicate that defines a contract initializer for _contract in the context of _contractContext.
+	smtutil::Expression initializer(ContractDefinition const& _contract, ContractDefinition const& _contractContext);
 	/// @returns a predicate that defines a constructor summary.
 	smtutil::Expression summary(ContractDefinition const& _contract);
 	/// @returns a predicate that defines a function summary.
@@ -274,7 +301,7 @@ private:
 	std::map<ContractDefinition const*, Predicate const*> m_nondetInterfaces;
 
 	std::map<ContractDefinition const*, Predicate const*> m_constructorSummaries;
-	std::map<ContractDefinition const*, Predicate const*> m_contractInitializers;
+	std::map<ContractDefinition const*, std::map<ContractDefinition const*, Predicate const*>> m_contractInitializers;
 
 	/// Artificial Error predicate.
 	/// Single error block for all assertions.
@@ -368,8 +395,6 @@ private:
 
 	/// SMT solvers that are chosen at runtime.
 	smtutil::SMTSolverChoice m_enabledSolvers;
-
-	ModelCheckerSettings const& m_settings;
 };
 
 }

@@ -25,9 +25,7 @@
 
 #include <libyul/AsmAnalysis.h>
 #include <libyul/AsmAnalysisInfo.h>
-#include <libyul/AsmParser.h>
-#include <libyul/AsmPrinter.h>
-#include <libyul/backends/evm/AsmCodeGen.h>
+#include <libyul/backends/evm/EthAssemblyAdapter.h>
 #include <libyul/backends/evm/EVMAssembly.h>
 #include <libyul/backends/evm/EVMCodeTransform.h>
 #include <libyul/backends/evm/EVMDialect.h>
@@ -36,7 +34,6 @@
 #include <libyul/backends/wasm/WasmDialect.h>
 #include <libyul/backends/wasm/WasmObjectCompiler.h>
 #include <libyul/backends/wasm/EVMToEwasmTranslator.h>
-#include <libyul/optimiser/Metrics.h>
 #include <libyul/ObjectParser.h>
 #include <libyul/optimiser/Suite.h>
 
@@ -44,6 +41,7 @@
 
 #include <libevmasm/Assembly.h>
 #include <liblangutil/Scanner.h>
+#include <optional>
 
 using namespace std;
 using namespace solidity;
@@ -148,7 +146,7 @@ bool AssemblyStack::analyzeParsed(Object& _object)
 	return success;
 }
 
-void AssemblyStack::compileEVM(AbstractAssembly& _assembly, bool _evm15, bool _optimize) const
+void AssemblyStack::compileEVM(AbstractAssembly& _assembly, bool _optimize) const
 {
 	EVMDialect const* dialect = nullptr;
 	switch (m_language)
@@ -165,7 +163,7 @@ void AssemblyStack::compileEVM(AbstractAssembly& _assembly, bool _evm15, bool _o
 			break;
 	}
 
-	EVMObjectCompiler::compile(*m_parserResult, _assembly, *dialect, _evm15, _optimize);
+	EVMObjectCompiler::compile(*m_parserResult, _assembly, *dialect, _optimize);
 }
 
 void AssemblyStack::optimize(Object& _object, bool _isCreation)
@@ -185,7 +183,9 @@ void AssemblyStack::optimize(Object& _object, bool _isCreation)
 		meter.get(),
 		_object,
 		m_optimiserSettings.optimizeStackAllocation,
-		m_optimiserSettings.yulOptimiserSteps
+		m_optimiserSettings.yulOptimiserSteps,
+		_isCreation ? nullopt : make_optional(m_optimiserSettings.expectedExecutionsPerDeployment),
+		{}
 	);
 }
 
@@ -200,15 +200,6 @@ MachineAssemblyObject AssemblyStack::assemble(Machine _machine) const
 	{
 	case Machine::EVM:
 		return assembleWithDeployed().first;
-	case Machine::EVM15:
-	{
-		MachineAssemblyObject object;
-		EVMAssembly assembly(true);
-		compileEVM(assembly, true, m_optimiserSettings.optimizeStackAllocation);
-		object.bytecode = make_shared<evmasm::LinkerObject>(assembly.finalize());
-		/// TODO: fill out text representation
-		return object;
-	}
 	case Machine::Ewasm:
 	{
 		yulAssert(m_language == Language::Ewasm, "");
@@ -235,7 +226,7 @@ std::pair<MachineAssemblyObject, MachineAssemblyObject> AssemblyStack::assembleW
 
 	evmasm::Assembly assembly;
 	EthAssemblyAdapter adapter(assembly);
-	compileEVM(adapter, false, m_optimiserSettings.optimizeStackAllocation);
+	compileEVM(adapter, m_optimiserSettings.optimizeStackAllocation);
 
 	MachineAssemblyObject creationObject;
 	creationObject.bytecode = make_shared<evmasm::LinkerObject>(assembly.assemble());

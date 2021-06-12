@@ -41,7 +41,8 @@ Predicate const* Predicate::create(
 	PredicateType _type,
 	EncodingContext& _context,
 	ASTNode const* _node,
-	ContractDefinition const* _contractContext
+	ContractDefinition const* _contractContext,
+	vector<ScopeOpener const*> _scopeStack
 )
 {
 	smt::SymbolicFunctionVariable predicate{_sort, move(_name), _context};
@@ -50,7 +51,7 @@ Predicate const* Predicate::create(
 	return &m_predicates.emplace(
 		std::piecewise_construct,
 		std::forward_as_tuple(functorName),
-		std::forward_as_tuple(move(predicate), _type, _node, _contractContext)
+		std::forward_as_tuple(move(predicate), _type, _node, _contractContext, move(_scopeStack))
 	).first->second;
 }
 
@@ -58,12 +59,14 @@ Predicate::Predicate(
 	smt::SymbolicFunctionVariable&& _predicate,
 	PredicateType _type,
 	ASTNode const* _node,
-	ContractDefinition const* _contractContext
+	ContractDefinition const* _contractContext,
+	vector<ScopeOpener const*> _scopeStack
 ):
 	m_predicate(move(_predicate)),
 	m_type(_type),
 	m_node(_node),
-	m_contractContext(_contractContext)
+	m_contractContext(_contractContext),
+	m_scopeStack(_scopeStack)
 {
 }
 
@@ -100,6 +103,11 @@ void Predicate::newFunctor()
 ASTNode const* Predicate::programNode() const
 {
 	return m_node;
+}
+
+ContractDefinition const* Predicate::contextContract() const
+{
+	return m_contractContext;
 }
 
 ContractDefinition const* Predicate::programContract() const
@@ -151,6 +159,16 @@ bool Predicate::isSummary() const
 bool Predicate::isFunctionSummary() const
 {
 	return m_type == PredicateType::FunctionSummary;
+}
+
+bool Predicate::isFunctionBlock() const
+{
+	return m_type == PredicateType::FunctionBlock;
+}
+
+bool Predicate::isFunctionErrorBlock() const
+{
+	return m_type == PredicateType::FunctionErrorBlock;
 }
 
 bool Predicate::isInternalCall() const
@@ -225,9 +243,16 @@ string Predicate::formatSummaryCall(vector<smtutil::Expression> const& _args) co
 		fun->isFallback() ? "fallback" :
 		fun->isReceive() ? "receive" :
 		fun->name();
-	solAssert(fun->annotation().contract, "");
-	return fun->annotation().contract->name() + "." + fName + "(" + boost::algorithm::join(functionArgs, ", ") + ")" + value;
 
+	string prefix;
+	if (fun->isFree())
+		prefix = !fun->sourceUnitName().empty() ? (fun->sourceUnitName() + ":") : "";
+	else
+	{
+		solAssert(fun->annotation().contract, "");
+		prefix = fun->annotation().contract->name() + ".";
+	}
+	return prefix + fName + "(" + boost::algorithm::join(functionArgs, ", ") + ")" + value;
 }
 
 vector<optional<string>> Predicate::summaryStateValues(vector<smtutil::Expression> const& _args) const
@@ -308,7 +333,33 @@ vector<optional<string>> Predicate::summaryPostOutputValues(vector<smtutil::Expr
 	return formatExpressions(outValues, outTypes);
 }
 
-vector<optional<string>> Predicate::formatExpressions(vector<smtutil::Expression> const& _exprs, vector<TypePointer> const& _types) const
+pair<vector<optional<string>>, vector<VariableDeclaration const*>> Predicate::localVariableValues(vector<smtutil::Expression> const& _args) const
+{
+	/// The signature of a local block predicate is:
+	/// block(error, this, abiFunctions, cryptoFunctions, txData, preBlockchainState, preStateVars, preInputVars, postBlockchainState, postStateVars, postInputVars, outputVars, localVars).
+	/// Here we are interested in localVars.
+	auto const* function = programFunction();
+	solAssert(function, "");
+
+	auto const& localVars = SMTEncoder::localVariablesIncludingModifiers(*function, m_contractContext);
+	auto first = _args.end() - static_cast<int>(localVars.size());
+	vector<smtutil::Expression> outValues(first, _args.end());
+
+	auto mask = applyMap(
+		localVars,
+		[this](auto _var) {
+			auto varScope = dynamic_cast<ScopeOpener const*>(_var->scope());
+			return find(begin(m_scopeStack), end(m_scopeStack), varScope) != end(m_scopeStack);
+		}
+	);
+	auto localVarsInScope = util::filter(localVars, mask);
+	auto outValuesInScope = util::filter(outValues, mask);
+
+	auto outTypes = applyMap(localVarsInScope, [](auto _var) { return _var->type(); });
+	return {formatExpressions(outValuesInScope, outTypes), localVarsInScope};
+}
+
+vector<optional<string>> Predicate::formatExpressions(vector<smtutil::Expression> const& _exprs, vector<Type const*> const& _types) const
 {
 	solAssert(_exprs.size() == _types.size(), "");
 	vector<optional<string>> strExprs;
@@ -317,7 +368,7 @@ vector<optional<string>> Predicate::formatExpressions(vector<smtutil::Expression
 	return strExprs;
 }
 
-optional<string> Predicate::expressionToString(smtutil::Expression const& _expr, TypePointer _type) const
+optional<string> Predicate::expressionToString(smtutil::Expression const& _expr, Type const* _type) const
 {
 	if (smt::isNumber(*_type))
 	{
@@ -456,7 +507,7 @@ bool Predicate::fillArray(smtutil::Expression const& _expr, vector<string>& _arr
 
 map<string, optional<string>> Predicate::readTxVars(smtutil::Expression const& _tx) const
 {
-	map<string, TypePointer> const txVars{
+	map<string, Type const*> const txVars{
 		{"block.chainid", TypeProvider::uint256()},
 		{"block.coinbase", TypeProvider::address()},
 		{"block.difficulty", TypeProvider::uint256()},

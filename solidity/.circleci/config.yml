@@ -9,20 +9,20 @@ version: 2.1
 parameters:
   ubuntu-2004-docker-image:
     type: string
-    # solbuildpackpusher/solidity-buildpack-deps:ubuntu2004-5
-    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:2d306b8da3485c2584a8868d656dc36c1ae50f003ff085ad2e904e312534b9b7"
+    # solbuildpackpusher/solidity-buildpack-deps:ubuntu2004-6
+    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:da44d7f78e093f7f0415abf07f7c1fd1c2ed4fa65fefea428821a05186c42ec9"
   ubuntu-2004-clang-docker-image:
     type: string
-    # solbuildpackpusher/solidity-buildpack-deps:ubuntu2004.clang-5
-    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:4fbc7a99dd0b204fef587856d89640e4b2060d459ba15c32b89733b2a6054d7f"
+    # solbuildpackpusher/solidity-buildpack-deps:ubuntu2004.clang-6
+    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:c78dd9c48d393b57afe053aeb2d0d358a9f31ac85039a181724c2f8408d0bcf8"
   ubuntu-1604-clang-ossfuzz-docker-image:
     type: string
-    # solbuildpackpusher/solidity-buildpack-deps:ubuntu1604.clang.ossfuzz-8
-    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:42f47b7ddafbf57b4e48357022cf34dc38ae477b05ddc2210e7ed68d821c2019"
+    # solbuildpackpusher/solidity-buildpack-deps:ubuntu1604.clang.ossfuzz-9
+    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:5078e1d74ab6f4329e9218c2d8c0ebe2d42817a3d4c3c62ce887100cbe9bc739"
   emscripten-docker-image:
     type: string
-    # solbuildpackpusher/solidity-buildpack-deps:emscripten-4
-    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:434719d8104cab47712dd1f56f255994d04eb65b802c0d382790071c1a0c074b"
+    # solbuildpackpusher/solidity-buildpack-deps:emscripten-5
+    default: "solbuildpackpusher/solidity-buildpack-deps@sha256:d28afb9624c2352ea40f157d1a321ffac77f54a21e33a8e8744f9126b780ded4"
 
 orbs:
   win: circleci/windows@2.2.0
@@ -90,6 +90,7 @@ defaults:
         - test/tools/ossfuzz/const_opt_ossfuzz
         - test/tools/ossfuzz/solc_mutator_ossfuzz
         - test/tools/ossfuzz/solc_ossfuzz
+        - test/tools/ossfuzz/stack_reuse_codegen_ossfuzz
         - test/tools/ossfuzz/strictasm_assembly_ossfuzz
         - test/tools/ossfuzz/strictasm_diff_ossfuzz
         - test/tools/ossfuzz/strictasm_opt_ossfuzz
@@ -353,8 +354,8 @@ jobs:
           command: apt -q update && apt install -y python3-pip
       - run:
           name: Install pylint
-          command: python3 -m pip install pylint z3-solver pygments-lexer-solidity
-          # also z3-solver to make sure pylint knows about this module, pygments-lexer-solidity for docs
+          command: python3 -m pip install pylint z3-solver pygments-lexer-solidity parsec tabulate
+          # also z3-solver, parsec and tabulate to make sure pylint knows about this module, pygments-lexer-solidity for docs
       - run:
           name: Linting Python Scripts
           command: ./scripts/pylint_all.py
@@ -570,7 +571,9 @@ jobs:
 
   b_archlinux:
     docker:
-      - image: archlinux/base
+      # FIXME: Newer releases won't work until CircleCI updates its host machines.
+      # See https://github.com/ethereum/solidity/pull/11332
+      - image: archlinux:base-20210131.0.14634
     environment:
       TERM: xterm
       MAKEFLAGS: -j 3
@@ -709,11 +712,16 @@ jobs:
 
   t_archlinux_soltest: &t_archlinux_soltest
       docker:
-        - image: archlinux/base
+        # FIXME: Newer releases won't work until CircleCI updates its host machines.
+        # See https://github.com/ethereum/solidity/pull/11332
+        - image: archlinux:base-20210131.0.14634
       environment:
         EVM: constantinople
         OPTIMIZE: 0
         TERM: xterm
+        # For Archlinux we do not have prebuilt docker images and we would need to build evmone from source,
+        # thus we forgo semantics tests to speed things up.
+        SOLTEST_FLAGS: --no-semantic-tests
       steps:
         - run:
             name: Install runtime dependencies
@@ -1005,18 +1013,39 @@ jobs:
   t_bytecode_compare:
     docker:
       - image: << pipeline.parameters.ubuntu-2004-docker-image >>
+    environment:
+      REPORT_FILES: |
+        bytecode-report-emscripten.txt
+        bytecode-report-ubuntu-json.txt
+        bytecode-report-ubuntu-cli.txt
+        bytecode-report-osx-json.txt
+        bytecode-report-osx-cli.txt
+        bytecode-report-windows-json.txt
+        bytecode-report-windows-cli.txt
     steps:
       - attach_workspace:
           at: .
-      - run: |
-          diff --report-identical-files --from-file \
-            bytecode-report-emscripten.txt \
-            bytecode-report-ubuntu-json.txt \
-            bytecode-report-ubuntu-cli.txt \
-            bytecode-report-osx-json.txt \
-            bytecode-report-osx-cli.txt \
-            bytecode-report-windows-json.txt \
-            bytecode-report-windows-cli.txt
+      - run:
+          name: Compare reports
+          command: diff --brief --report-identical-files --from-file $REPORT_FILES
+      - run:
+          name: Print diff
+          when: on_fail
+          command: diff --unified=0 --report-identical-files --from-file $REPORT_FILES | head --lines 50
+      - run:
+          name: Install zip
+          when: on_fail
+          command: |
+            apt update --quiet
+            apt install zip --assume-yes
+      - run:
+          name: Bundle reports into a single package
+          when: on_fail
+          command: zip all-bytecode-reports.zip $REPORT_FILES
+      - store_artifacts:
+          # NOTE: store_artifacts does not support the 'when' attribute.
+          # Fortunately when the artifact does not exist it just says "No artifact files found" and ignores it.
+          path: all-bytecode-reports.zip
 
 workflows:
   version: 2

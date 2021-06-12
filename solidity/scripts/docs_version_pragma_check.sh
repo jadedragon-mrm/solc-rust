@@ -29,7 +29,9 @@ set -e
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SOLIDITY_BUILD_DIR=${SOLIDITY_BUILD_DIR:-${REPO_ROOT}/build}
+# shellcheck source=scripts/common.sh
 source "${REPO_ROOT}/scripts/common.sh"
+# shellcheck source=scripts/common_cmdline.sh
 source "${REPO_ROOT}/scripts/common_cmdline.sh"
 
 developmentVersion=$("$REPO_ROOT/scripts/get_version.sh")
@@ -38,7 +40,9 @@ function versionGreater()
 {
     v1=$1
     v2=$2
+    # shellcheck disable=SC2206
     ver1=( ${v1//./ } )
+    # shellcheck disable=SC2206
     ver2=( ${v2//./ } )
 
     if (( "${ver1[0]}" > "${ver2[0]}" ))
@@ -66,11 +70,12 @@ function versionEqual()
 function getAllAvailableVersions()
 {
     allVersions=()
-    local allListedVersions=( $(
+    local allListedVersions
+    mapfile -t allListedVersions <<< "$(
         wget -q -O- https://binaries.soliditylang.org/bin/list.txt |
         grep -Po '(?<=soljson-v)\d+.\d+.\d+(?=\+commit)' |
         sort -V
-    ) )
+    )"
     for listed in "${allListedVersions[@]}"
     do
         if versionGreater "$listed" "0.4.10"
@@ -187,8 +192,7 @@ SOLTMPDIR=$(mktemp -d)
         ln -sf "$solc_bin" "solc"
         chmod a+x solc
 
-        SOLC="$SOLTMPDIR/solc"
-        compileFull "${opts[@]}" "$SOLTMPDIR/$f"
+        SOLC="$SOLTMPDIR/solc" compileFull "${opts[@]}" "$SOLTMPDIR/$f"
     done
 )
 rm -rf "$SOLTMPDIR"

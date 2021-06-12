@@ -27,13 +27,14 @@
 #include <libyul/AST.h>
 #include <libyul/Dialect.h>
 #include <libyul/Exceptions.h>
+#include <libyul/Utilities.h>
 
 #include <libsolutil/CommonData.h>
 #include <libsolutil/cxx20.h>
 
-#include <boost/range/adaptor/reversed.hpp>
-#include <boost/range/algorithm_ext/erase.hpp>
 #include <variant>
+
+#include <range/v3/view/reverse.hpp>
 
 using namespace std;
 using namespace solidity;
@@ -155,16 +156,11 @@ void DataFlowAnalyzer::operator()(FunctionDefinition& _fun)
 {
 	// Save all information. We might rather reinstantiate this class,
 	// but this could be difficult if it is subclassed.
-	map<YulString, AssignedValue> value;
-	size_t loopDepth{0};
-	unordered_map<YulString, set<YulString>> references;
-	unordered_map<YulString, YulString> storage;
-	unordered_map<YulString, YulString> memory;
-	swap(m_value, value);
-	swap(m_loopDepth, loopDepth);
-	swap(m_references, references);
-	swap(m_storage, storage);
-	swap(m_memory, memory);
+	ScopedSaveAndRestore valueResetter(m_value, {});
+	ScopedSaveAndRestore loopDepthResetter(m_loopDepth, 0u);
+	ScopedSaveAndRestore referencesResetter(m_references, {});
+	ScopedSaveAndRestore storageResetter(m_storage, {});
+	ScopedSaveAndRestore memoryResetter(m_memory, {});
 	pushScope(true);
 
 	for (auto const& parameter: _fun.parameters)
@@ -181,11 +177,6 @@ void DataFlowAnalyzer::operator()(FunctionDefinition& _fun)
 	// statement.
 
 	popScope();
-	swap(m_value, value);
-	swap(m_loopDepth, loopDepth);
-	swap(m_references, references);
-	swap(m_storage, storage);
-	swap(m_memory, memory);
 }
 
 void DataFlowAnalyzer::operator()(ForLoop& _for)
@@ -387,7 +378,7 @@ void DataFlowAnalyzer::joinKnowledgeHelper(
 
 bool DataFlowAnalyzer::inScope(YulString _variableName) const
 {
-	for (auto const& scope: m_variableScopes | boost::adaptors::reversed)
+	for (auto const& scope: m_variableScopes | ranges::views::reverse)
 	{
 		if (scope.variables.count(_variableName))
 			return true;
@@ -395,6 +386,14 @@ bool DataFlowAnalyzer::inScope(YulString _variableName) const
 			return false;
 	}
 	return false;
+}
+
+optional<u256> DataFlowAnalyzer::valueOfIdentifier(YulString const& _name)
+{
+	if (m_value.count(_name))
+		if (Literal const* literal = get_if<Literal>(m_value.at(_name).value))
+			return valueOfLiteral(*literal);
+	return nullopt;
 }
 
 std::optional<pair<YulString, YulString>> DataFlowAnalyzer::isSimpleStore(
@@ -421,4 +420,3 @@ std::optional<YulString> DataFlowAnalyzer::isSimpleLoad(
 				return key->name;
 	return {};
 }
-

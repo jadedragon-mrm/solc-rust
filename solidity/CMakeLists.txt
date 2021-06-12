@@ -21,7 +21,7 @@ include(EthPolicy)
 eth_policy()
 
 # project name and version should be set after cmake_policy CMP0048
-set(PROJECT_VERSION "0.8.2")
+set(PROJECT_VERSION "0.8.5")
 # OSX target needed in order to support std::visit
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14")
 project(solidity VERSION ${PROJECT_VERSION} LANGUAGES C CXX)
@@ -107,12 +107,12 @@ add_subdirectory(libevmasm)
 add_subdirectory(libyul)
 add_subdirectory(libsolidity)
 add_subdirectory(libsolc)
-#add_subdirectory(tools)
+add_subdirectory(tools)
 
-#if (NOT EMSCRIPTEN)
-#	add_subdirectory(solc)
-#endif()
+if (NOT EMSCRIPTEN)
+	add_subdirectory(solc)
+endif()
 
-#if (TESTS AND NOT EMSCRIPTEN)
-#	add_subdirectory(test)
-#endif()
+if (TESTS AND NOT EMSCRIPTEN)
+	add_subdirectory(test)
+endif()
