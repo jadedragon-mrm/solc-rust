@@ -29,6 +29,7 @@
 #include <libsolutil/Assertions.h>
 #include <iostream>
 #include <sstream>
+#include <optional>
 
 namespace solidity::evmasm
 {

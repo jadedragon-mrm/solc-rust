@@ -12,7 +12,9 @@ fn main() {
         .define("TOOLS", "OFF")
         .define("USE_Z3", "OFF")
         .define("USE_CVC4", "OFF")
-        .define("Boost_USE_STATIC_LIBS",  "ON")
+        .define("Boost_USE_STATIC_LIBS", "ON")
+        .define("MAKE_C_COMPILER", "/usr/bin/c++-11")
+        .define("CMAKE_CXX_COMPILER", "/usr/bin/g++-11")
         .build();
 
     /*for lib in vec!["solc", "solidity", "yul", "langutil", "evmasm", "solutil", "smtutil"] {
@@ -43,7 +45,7 @@ fn main() {
     //println!("cargo:rustc-link-lib=static=boost_system");
     //println!("cargo:rustc-link-lib=static=boost_filesystem");
     //println!("cargo:rustc-link-lib=static=boost_regex");
-    
+
     // println!("cargo:rustc-link-lib=boost_system");
     // println!("cargo:rustc-link-lib=boost_filesystem");
     // println!("cargo:rustc-link-lib=boost_regex");
