@@ -47,7 +47,7 @@ bool fitsPrecisionExp(bigint const& _base, bigint const& _exp)
 
 	size_t const bitsMax = 4096;
 
-	unsigned mostSignificantBaseBit = boost::multiprecision::msb(_base);
+	unsigned mostSignificantBaseBit = (unsigned)boost::multiprecision::msb(_base);
 	if (mostSignificantBaseBit == 0) // _base == 1
 		return true;
 	if (mostSignificantBaseBit > bitsMax) // _base >= 2 ^ 4096
