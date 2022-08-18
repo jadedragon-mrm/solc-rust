@@ -53,8 +53,8 @@ set(sources
 	ast/ASTAnnotations.h
 	ast/ASTEnums.h
 	ast/ASTForward.h
-	ast/ASTJsonConverter.cpp
-	ast/ASTJsonConverter.h
+	ast/ASTJsonExporter.cpp
+	ast/ASTJsonExporter.h
 	ast/ASTUtils.cpp
 	ast/ASTUtils.h
 	ast/ASTJsonImporter.cpp
@@ -108,6 +108,10 @@ set(sources
 	formal/CHC.h
 	formal/EncodingContext.cpp
 	formal/EncodingContext.h
+	formal/ExpressionFormatter.cpp
+	formal/ExpressionFormatter.h
+	formal/Invariants.cpp
+	formal/Invariants.h
 	formal/ModelChecker.cpp
 	formal/ModelChecker.h
 	formal/ModelCheckerSettings.cpp
@@ -151,6 +155,22 @@ set(sources
 	interface/StorageLayout.h
 	interface/Version.cpp
 	interface/Version.h
+	lsp/FileRepository.cpp
+	lsp/FileRepository.h
+	lsp/GotoDefinition.cpp
+	lsp/GotoDefinition.h
+	lsp/RenameSymbol.cpp
+	lsp/RenameSymbol.h
+	lsp/HandlerBase.cpp
+	lsp/HandlerBase.h
+	lsp/LanguageServer.cpp
+	lsp/LanguageServer.h
+	lsp/SemanticTokensBuilder.cpp
+	lsp/SemanticTokensBuilder.h
+	lsp/Transport.cpp
+	lsp/Transport.h
+	lsp/Utils.cpp
+	lsp/Utils.h
 	parsing/DocStringParser.cpp
 	parsing/DocStringParser.h
 	parsing/Parser.cpp
@@ -159,4 +179,5 @@ set(sources
 )
 
 add_library(solidity ${sources})
-target_link_libraries(solidity PUBLIC yul evmasm langutil smtutil solutil Boost::boost)
+target_link_libraries(solidity PUBLIC yul evmasm langutil smtutil solutil Boost::boost fmt::fmt-header-only)
+

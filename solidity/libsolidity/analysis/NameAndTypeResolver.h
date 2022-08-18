@@ -93,6 +93,10 @@ public:
 	/// Should only be called during the initial resolving phase.
 	/// @note Returns a null pointer if any component in the path was not unique or not found.
 	Declaration const* pathFromCurrentScope(std::vector<ASTString> const& _path) const;
+	/// Resolves a path starting from the "current" scope, but also searches parent scopes.
+	/// Should only be called during the initial resolving phase.
+	/// @note Returns an empty vector if any component in the path was non-unique or not found. Otherwise, all declarations along the path are returned.
+	std::vector<Declaration const*> pathFromCurrentScopeWithAllDeclarations(std::vector<ASTString> const& _path) const;
 
 	/// Generate and store warnings about declarations with the same name.
 	void warnHomonymDeclarations() const;
@@ -175,9 +179,6 @@ private:
 	void registerDeclaration(Declaration& _declaration);
 
 	static bool isOverloadedFunction(Declaration const& _declaration1, Declaration const& _declaration2);
-
-	/// @returns the canonical name of the current scope.
-	std::string currentCanonicalName() const;
 
 	std::map<ASTNode const*, std::shared_ptr<DeclarationContainer>>& m_scopes;
 	ASTNode const* m_currentScope = nullptr;

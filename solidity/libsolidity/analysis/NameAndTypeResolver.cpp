@@ -83,7 +83,7 @@ bool NameAndTypeResolver::performImports(SourceUnit& _sourceUnit, map<string, So
 			if (!imp->symbolAliases().empty())
 				for (auto const& alias: imp->symbolAliases())
 				{
-					auto declarations = scope->second->resolveName(alias.symbol->name(), false);
+					auto declarations = scope->second->resolveName(alias.symbol->name());
 					if (declarations.empty())
 					{
 						m_errorReporter.declarationError(
@@ -102,7 +102,12 @@ bool NameAndTypeResolver::performImports(SourceUnit& _sourceUnit, map<string, So
 					else
 						for (Declaration const* declaration: declarations)
 							if (!DeclarationRegistrationHelper::registerDeclaration(
-								target, *declaration, alias.alias.get(), &alias.location, false, m_errorReporter
+								target,
+								*declaration,
+								alias.alias ? alias.alias.get() : &alias.symbol->name(),
+								&alias.location,
+								false,
+								m_errorReporter
 							))
 								error = true;
 				}
@@ -171,34 +176,52 @@ vector<Declaration const*> NameAndTypeResolver::resolveName(ASTString const& _na
 	auto iterator = m_scopes.find(_scope);
 	if (iterator == end(m_scopes))
 		return vector<Declaration const*>({});
-	return iterator->second->resolveName(_name, false);
+	return iterator->second->resolveName(_name);
 }
 
 vector<Declaration const*> NameAndTypeResolver::nameFromCurrentScope(ASTString const& _name, bool _includeInvisibles) const
 {
-	return m_currentScope->resolveName(_name, true, _includeInvisibles);
+	ResolvingSettings settings;
+	settings.recursive = true;
+	settings.alsoInvisible = _includeInvisibles;
+	return m_currentScope->resolveName(_name, move(settings));
 }
 
 Declaration const* NameAndTypeResolver::pathFromCurrentScope(vector<ASTString> const& _path) const
 {
+	if (auto declarations = pathFromCurrentScopeWithAllDeclarations(_path); !declarations.empty())
+		return declarations.back();
+
+	return nullptr;
+}
+
+std::vector<Declaration const*> NameAndTypeResolver::pathFromCurrentScopeWithAllDeclarations(std::vector<ASTString> const& _path) const
+{
 	solAssert(!_path.empty(), "");
-	vector<Declaration const*> candidates = m_currentScope->resolveName(
-		_path.front(),
-		/* _recursive */ true,
-		/* _alsoInvisible */ false,
-		/* _onlyVisibleAsUnqualifiedNames */ true
-	);
+	vector<Declaration const*> pathDeclarations;
+
+	ResolvingSettings settings;
+	settings.recursive = true;
+	settings.alsoInvisible = false;
+	settings.onlyVisibleAsUnqualifiedNames = true;
+	vector<Declaration const*> candidates = m_currentScope->resolveName(_path.front(), move(settings));
 
 	for (size_t i = 1; i < _path.size() && candidates.size() == 1; i++)
 	{
 		if (!m_scopes.count(candidates.front()))
-			return nullptr;
-		candidates = m_scopes.at(candidates.front())->resolveName(_path[i], false);
+			return {};
+
+		pathDeclarations.push_back(candidates.front());
+
+		candidates = m_scopes.at(candidates.front())->resolveName(_path[i]);
 	}
 	if (candidates.size() == 1)
-		return candidates.front();
+	{
+		pathDeclarations.push_back(candidates.front());
+		return pathDeclarations;
+	}
 	else
-		return nullptr;
+		return {};
 }
 
 void NameAndTypeResolver::warnHomonymDeclarations() const
@@ -520,9 +543,9 @@ bool DeclarationRegistrationHelper::registerDeclaration(
 		Declaration const* conflictingDeclaration = _container.conflictingDeclaration(_declaration, _name);
 		solAssert(conflictingDeclaration, "");
 		bool const comparable =
-			_errorLocation->source &&
-			conflictingDeclaration->location().source &&
-			_errorLocation->source->name() == conflictingDeclaration->location().source->name();
+			_errorLocation->sourceName &&
+			conflictingDeclaration->location().sourceName &&
+			*_errorLocation->sourceName == *conflictingDeclaration->location().sourceName;
 		if (comparable && _errorLocation->start < conflictingDeclaration->location().start)
 		{
 			firstDeclarationLocation = *_errorLocation;
@@ -566,7 +589,8 @@ bool DeclarationRegistrationHelper::visit(ImportDirective& _import)
 	if (!m_scopes[importee])
 		m_scopes[importee] = make_shared<DeclarationContainer>(nullptr, m_scopes[nullptr].get());
 	m_scopes[&_import] = m_scopes[importee];
-	return ASTVisitor::visit(_import);
+	ASTVisitor::visit(_import);
+	return false; // Do not recurse into child nodes (Identifier for symbolAliases)
 }
 
 bool DeclarationRegistrationHelper::visit(ContractDefinition& _contract)
@@ -607,13 +631,31 @@ bool DeclarationRegistrationHelper::visitNode(ASTNode& _node)
 
 	if (auto* declaration = dynamic_cast<Declaration*>(&_node))
 		registerDeclaration(*declaration);
+
+	if (auto* annotation = dynamic_cast<TypeDeclarationAnnotation*>(&_node.annotation()))
+	{
+		string canonicalName = dynamic_cast<Declaration const&>(_node).name();
+		solAssert(!canonicalName.empty(), "");
+
+		for (
+			ASTNode const* scope = m_currentScope;
+			scope != nullptr;
+			scope = m_scopes[scope]->enclosingNode()
+		)
+			if (auto decl = dynamic_cast<Declaration const*>(scope))
+			{
+				solAssert(!decl->name().empty(), "");
+				canonicalName = decl->name() + "." + canonicalName;
+			}
+
+		annotation->canonicalName = canonicalName;
+	}
+
 	if (dynamic_cast<ScopeOpener const*>(&_node))
 		enterNewSubScope(_node);
 
 	if (auto* variableScope = dynamic_cast<VariableScope*>(&_node))
 		m_currentFunction = variableScope;
-	if (auto* annotation = dynamic_cast<TypeDeclarationAnnotation*>(&_node.annotation()))
-		annotation->canonicalName = currentCanonicalName();
 
 	return true;
 }
@@ -661,25 +703,6 @@ void DeclarationRegistrationHelper::registerDeclaration(Declaration& _declaratio
 
 	solAssert(_declaration.annotation().scope == m_currentScope, "");
 	solAssert(_declaration.annotation().contract == m_currentContract, "");
-}
-
-string DeclarationRegistrationHelper::currentCanonicalName() const
-{
-	string ret;
-	for (
-		ASTNode const* scope = m_currentScope;
-		scope != nullptr;
-		scope = m_scopes[scope]->enclosingNode()
-	)
-	{
-		if (auto decl = dynamic_cast<Declaration const*>(scope))
-		{
-			if (!ret.empty())
-				ret = "." + ret;
-			ret = decl->name() + ret;
-		}
-	}
-	return ret;
 }
 
 }

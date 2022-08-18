@@ -57,14 +57,12 @@ ASTPointer<T> ASTJsonImporter::nullOrCast(Json::Value const& _json)
 
 map<string, ASTPointer<SourceUnit>> ASTJsonImporter::jsonToSourceUnit(map<string, Json::Value> const& _sourceList)
 {
-	m_sourceList = _sourceList;
 	for (auto const& src: _sourceList)
-		m_sourceLocations.emplace_back(make_shared<string const>(src.first));
-	for (auto const& srcPair: m_sourceList)
+		m_sourceNames.emplace_back(make_shared<string const>(src.first));
+	for (auto const& srcPair: _sourceList)
 	{
-		astAssert(!srcPair.second.isNull(), "");
+		astAssert(!srcPair.second.isNull());
 		astAssert(member(srcPair.second,"nodeType") == "SourceUnit", "The 'nodeType' of the highest node must be 'SourceUnit'.");
-		m_currentSourceName = srcPair.first;
 		m_sourceUnits[srcPair.first] = createSourceUnit(srcPair.second, srcPair.first);
 	}
 	return m_sourceUnits;
@@ -94,14 +92,28 @@ SourceLocation const ASTJsonImporter::createSourceLocation(Json::Value const& _n
 {
 	astAssert(member(_node, "src").isString(), "'src' must be a string");
 
-	return solidity::langutil::parseSourceLocation(_node["src"].asString(), m_currentSourceName, m_sourceLocations.size());
+	return solidity::langutil::parseSourceLocation(_node["src"].asString(), m_sourceNames);
+}
+
+optional<vector<SourceLocation>> ASTJsonImporter::createSourceLocations(Json::Value const& _node) const
+{
+	vector<SourceLocation> locations;
+
+	if (_node.isMember("nameLocations") && _node["nameLocations"].isArray())
+	{
+		for (auto const& val: _node["nameLocations"])
+			locations.emplace_back(langutil::parseSourceLocation(val.asString(), m_sourceNames));
+		return locations;
+	}
+
+	return nullopt;
 }
 
 SourceLocation ASTJsonImporter::createNameSourceLocation(Json::Value const& _node)
 {
 	astAssert(member(_node, "nameLocation").isString(), "'nameLocation' must be a string");
 
-	return solidity::langutil::parseSourceLocation(_node["nameLocation"].asString(), m_currentSourceName, m_sourceLocations.size());
+	return solidity::langutil::parseSourceLocation(_node["nameLocation"].asString(), m_sourceNames);
 }
 
 template<class T>
@@ -135,6 +147,8 @@ ASTPointer<ASTNode> ASTJsonImporter::convertJsonToASTNode(Json::Value const& _js
 		return createEnumDefinition(_json);
 	if (nodeType == "EnumValue")
 		return createEnumValue(_json);
+	if (nodeType == "UserDefinedValueTypeDefinition")
+		return createUserDefinedValueTypeDefinition(_json);
 	if (nodeType == "ParameterList")
 		return createParameterList(_json);
 	if (nodeType == "OverrideSpecifier")
@@ -229,6 +243,9 @@ ASTPointer<ASTNode> ASTJsonImporter::convertJsonToASTNode(Json::Value const& _js
 		return createDocumentation(_json);
 	else
 		astAssert(false, "Unknown type of ASTNode: " + nodeType);
+
+	// FIXME: Workaround for spurious GCC 12.1 warning (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105794)
+	util::unreachable();
 }
 
 // ============ functions to instantiate the AST-Nodes from Json-Nodes ==============
@@ -322,6 +339,7 @@ ASTPointer<IdentifierPath> ASTJsonImporter::createIdentifierPath(Json::Value con
 	astAssert(_node["name"].isString(), "Expected 'name' to be a string!");
 
 	vector<ASTString> namePath;
+	vector<SourceLocation> namePathLocations;
 	vector<string> strs;
 	string nameString = member(_node, "name").asString();
 	boost::algorithm::split(strs, nameString, boost::is_any_of("."));
@@ -331,7 +349,23 @@ ASTPointer<IdentifierPath> ASTJsonImporter::createIdentifierPath(Json::Value con
 		astAssert(!s.empty(), "Expected non-empty string for IdentifierPath element.");
 		namePath.emplace_back(s);
 	}
-	return createASTNode<IdentifierPath>(_node, namePath);
+
+	if (_node.isMember("nameLocations") && _node["nameLocations"].isArray())
+		for (auto const& val: _node["nameLocations"])
+			namePathLocations.emplace_back(langutil::parseSourceLocation(val.asString(), m_sourceNames));
+	else
+		namePathLocations.resize(namePath.size());
+
+	astAssert(
+		namePath.size() == namePathLocations.size(),
+		"SourceLocations don't match name paths."
+	);
+
+	return createASTNode<IdentifierPath>(
+		_node,
+		namePath,
+		namePathLocations
+	);
 }
 
 ASTPointer<InheritanceSpecifier> ASTJsonImporter::createInheritanceSpecifier(Json::Value const& _node)
@@ -348,10 +382,19 @@ ASTPointer<InheritanceSpecifier> ASTJsonImporter::createInheritanceSpecifier(Jso
 
 ASTPointer<UsingForDirective> ASTJsonImporter::createUsingForDirective(Json::Value const& _node)
 {
+	vector<ASTPointer<IdentifierPath>> functions;
+	if (_node.isMember("libraryName"))
+		functions.emplace_back(createIdentifierPath(_node["libraryName"]));
+	else if (_node.isMember("functionList"))
+		for (Json::Value const& function: _node["functionList"])
+			functions.emplace_back(createIdentifierPath(function["function"]));
+
 	return createASTNode<UsingForDirective>(
 		_node,
-		createIdentifierPath(member(_node, "libraryName")),
-		_node["typeName"].isNull() ? nullptr  : convertJsonToASTNode<TypeName>(_node["typeName"])
+		move(functions),
+		!_node.isMember("libraryName"),
+		_node["typeName"].isNull() ? nullptr  : convertJsonToASTNode<TypeName>(_node["typeName"]),
+		memberAsBool(_node, "global")
 	);
 }
 
@@ -386,6 +429,16 @@ ASTPointer<EnumValue> ASTJsonImporter::createEnumValue(Json::Value const& _node)
 	return createASTNode<EnumValue>(
 		_node,
 		memberAsASTString(_node, "name")
+	);
+}
+
+ASTPointer<UserDefinedValueTypeDefinition> ASTJsonImporter::createUserDefinedValueTypeDefinition(Json::Value const& _node)
+{
+	return createASTNode<UserDefinedValueTypeDefinition>(
+		_node,
+		memberAsASTString(_node, "name"),
+		createNameSourceLocation(_node),
+		convertJsonToASTNode<TypeName>(member(_node, "underlyingType"))
 	);
 }
 
@@ -475,17 +528,17 @@ ASTPointer<VariableDeclaration> ASTJsonImporter::createVariableDeclaration(Json:
 	if (mutabilityStr == "constant")
 	{
 		mutability = VariableDeclaration::Mutability::Constant;
-		astAssert(memberAsBool(_node, "constant"), "");
+		astAssert(memberAsBool(_node, "constant"));
 	}
 	else
 	{
-		astAssert(!memberAsBool(_node, "constant"), "");
+		astAssert(!memberAsBool(_node, "constant"));
 		if (mutabilityStr == "mutable")
 			mutability = VariableDeclaration::Mutability::Mutable;
 		else if (mutabilityStr == "immutable")
 			mutability = VariableDeclaration::Mutability::Immutable;
 		else
-			astAssert(false, "");
+			astAssert(false);
 	}
 
 	return createASTNode<VariableDeclaration>(
@@ -616,11 +669,24 @@ ASTPointer<InlineAssembly> ASTJsonImporter::createInlineAssembly(Json::Value con
 	astAssert(m_evmVersion == evmVersion, "Imported tree evm version differs from configured evm version!");
 
 	yul::Dialect const& dialect = yul::EVMDialect::strictAssemblyForEVM(evmVersion.value());
-	shared_ptr<yul::Block> operations = make_shared<yul::Block>(yul::AsmJsonImporter(m_currentSourceName).createBlock(member(_node, "AST")));
+	ASTPointer<vector<ASTPointer<ASTString>>> flags;
+	if (_node.isMember("flags"))
+	{
+		flags = make_shared<vector<ASTPointer<ASTString>>>();
+		Json::Value const& flagsNode = _node["flags"];
+		astAssert(flagsNode.isArray(), "Assembly flags must be an array.");
+		for (Json::ArrayIndex i = 0; i < flagsNode.size(); ++i)
+		{
+			astAssert(flagsNode[i].isString(), "Assembly flag must be a string.");
+			flags->emplace_back(make_shared<ASTString>(flagsNode[i].asString()));
+		}
+	}
+	shared_ptr<yul::Block> operations = make_shared<yul::Block>(yul::AsmJsonImporter(m_sourceNames).createBlock(member(_node, "AST")));
 	return createASTNode<InlineAssembly>(
 		_node,
 		nullOrASTString(_node, "documentation"),
 		dialect,
+		move(flags),
 		operations
 	);
 }
@@ -841,11 +907,17 @@ ASTPointer<FunctionCall> ASTJsonImporter::createFunctionCall(Json::Value const& 
 		astAssert(name.isString(), "Expected 'names' members to be strings!");
 		names.push_back(make_shared<ASTString>(name.asString()));
 	}
+
+	optional<vector<SourceLocation>> sourceLocations = createSourceLocations(_node);
+
 	return createASTNode<FunctionCall>(
 		_node,
 		convertJsonToASTNode<Expression>(member(_node, "expression")),
 		arguments,
-		names
+		names,
+		sourceLocations ?
+			*sourceLocations :
+			vector<SourceLocation>(names.size())
 	);
 }
 
@@ -879,10 +951,15 @@ ASTPointer<NewExpression> ASTJsonImporter::createNewExpression(Json::Value const
 
 ASTPointer<MemberAccess> ASTJsonImporter::createMemberAccess(Json::Value const&  _node)
 {
+	SourceLocation memberLocation;
+	if (member(_node, "memberLocation").isString())
+		memberLocation = solidity::langutil::parseSourceLocation(_node["memberLocation"].asString(), m_sourceNames);
+
 	return createASTNode<MemberAccess>(
 		_node,
 		convertJsonToASTNode<Expression>(member(_node, "expression")),
-		memberAsASTString(_node, "memberName")
+		memberAsASTString(_node, "memberName"),
+		std::move(memberLocation)
 	);
 }
 
@@ -960,7 +1037,8 @@ Json::Value ASTJsonImporter::member(Json::Value const& _node, string const& _nam
 
 Token ASTJsonImporter::scanSingleToken(Json::Value const& _node)
 {
-	langutil::Scanner scanner{langutil::CharStream(_node.asString(), "")};
+	langutil::CharStream charStream(_node.asString(), "");
+	langutil::Scanner scanner{charStream};
 	astAssert(scanner.peekNextToken() == Token::EOS, "Token string is too long.");
 	return scanner.currentToken();
 }
@@ -1040,6 +1118,9 @@ Visibility ASTJsonImporter::visibility(Json::Value const& _node)
 		return Visibility::External;
 	else
 		astAssert(false, "Unknown visibility declaration");
+
+	// FIXME: Workaround for spurious GCC 12.1 warning (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105794)
+	util::unreachable();
 }
 
 VariableDeclaration::Location ASTJsonImporter::location(Json::Value const& _node)
@@ -1059,6 +1140,9 @@ VariableDeclaration::Location ASTJsonImporter::location(Json::Value const& _node
 		return VariableDeclaration::Location::CallData;
 	else
 		astAssert(false, "Unknown location declaration");
+
+	// FIXME: Workaround for spurious GCC 12.1 warning (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105794)
+	util::unreachable();
 }
 
 Literal::SubDenomination ASTJsonImporter::subdenomination(Json::Value const& _node)
@@ -1092,6 +1176,9 @@ Literal::SubDenomination ASTJsonImporter::subdenomination(Json::Value const& _no
 		return Literal::SubDenomination::Year;
 	else
 		astAssert(false, "Unknown subdenomination");
+
+	// FIXME: Workaround for spurious GCC 12.1 warning (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105794)
+	util::unreachable();
 }
 
 StateMutability ASTJsonImporter::stateMutability(Json::Value const& _node)
@@ -1109,6 +1196,9 @@ StateMutability ASTJsonImporter::stateMutability(Json::Value const& _node)
 		return StateMutability::Payable;
 	else
 		astAssert(false, "Unknown stateMutability");
+
+	// FIXME: Workaround for spurious GCC 12.1 warning (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105794)
+	util::unreachable();
 }
 
 }

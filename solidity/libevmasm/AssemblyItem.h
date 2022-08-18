@@ -26,10 +26,11 @@
 #include <libevmasm/Exceptions.h>
 #include <liblangutil/SourceLocation.h>
 #include <libsolutil/Common.h>
+#include <libsolutil/Numeric.h>
 #include <libsolutil/Assertions.h>
+#include <optional>
 #include <iostream>
 #include <sstream>
-#include <optional>
 
 namespace solidity::evmasm
 {
@@ -39,7 +40,6 @@ enum AssemblyItemType
 	UndefinedItem,
 	Operation,
 	Push,
-	PushString,
 	PushTag,
 	PushSub,
 	PushSubSize,
@@ -52,6 +52,8 @@ enum AssemblyItemType
 	AssignImmutable, ///< Assigns the current value on the stack to an immutable variable. Only valid during creation code.
 	VerbatimBytecode ///< Contains data that is inserted into the bytecode code section without modification.
 };
+
+enum class Precision { Precise , Approximate };
 
 class Assembly;
 class AssemblyItem;
@@ -104,6 +106,13 @@ public:
 	u256 const& data() const { assertThrow(m_type != Operation, util::Exception, ""); return *m_data; }
 	void setData(u256 const& _data) { assertThrow(m_type != Operation, util::Exception, ""); m_data = std::make_shared<u256>(_data); }
 
+	/// This function is used in `Assembly::assemblyJSON`.
+	/// It returns the name & data of the current assembly item.
+	/// @returns a pair, where the first element is the json-assembly
+	/// item name, where second element is the string representation
+	/// of it's data.
+	std::pair<std::string, std::string> nameAndData() const;
+
 	bytes const& verbatimData() const { assertThrow(m_type == VerbatimBytecode, util::Exception, ""); return std::get<2>(*m_verbatimBytecode); }
 
 	/// @returns the instruction of this item (only valid if type() == Operation)
@@ -149,7 +158,10 @@ public:
 
 	/// @returns an upper bound for the number of bytes required by this item, assuming that
 	/// the value of a jump tag takes @a _addressLength bytes.
-	size_t bytesRequired(size_t _addressLength) const;
+	/// @param _precision Whether to return a precise count (which involves
+	///                   counting immutable references which are only set after
+	///                   a call to `assemble()`) or an approx. count.
+	size_t bytesRequired(size_t _addressLength, Precision _precision = Precision::Precise) const;
 	size_t arguments() const;
 	size_t returnValues() const;
 	size_t deposit() const { return returnValues() - arguments(); }
@@ -171,9 +183,11 @@ public:
 
 	size_t m_modifierDepth = 0;
 
-	void setImmutableOccurrences(size_t _n) const { m_immutableOccurrences = std::make_shared<size_t>(_n); }
+	void setImmutableOccurrences(size_t _n) const { m_immutableOccurrences = _n; }
 
 private:
+	size_t opcodeCount() const noexcept;
+
 	AssemblyItemType m_type;
 	Instruction m_instruction; ///< Only valid if m_type == Operation
 	std::shared_ptr<u256> m_data; ///< Only valid if m_type != Operation
@@ -186,14 +200,14 @@ private:
 	/// e.g. PushSubSize, PushTag, PushSub, etc.
 	mutable std::shared_ptr<u256> m_pushedValue;
 	/// Number of PushImmutable's with the same hash. Only used for AssignImmutable.
-	mutable std::shared_ptr<size_t> m_immutableOccurrences;
+	mutable std::optional<size_t> m_immutableOccurrences;
 };
 
-inline size_t bytesRequired(AssemblyItems const& _items, size_t _addressLength)
+inline size_t bytesRequired(AssemblyItems const& _items, size_t _addressLength,  Precision _precision = Precision::Precise)
 {
 	size_t size = 0;
 	for (AssemblyItem const& item: _items)
-		size += item.bytesRequired(_addressLength);
+		size += item.bytesRequired(_addressLength, _precision);
 	return size;
 }
 

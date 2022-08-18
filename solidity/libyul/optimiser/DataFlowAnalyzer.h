@@ -29,6 +29,7 @@
 #include <libyul/AST.h> // Needed for m_zero below.
 #include <libyul/SideEffects.h>
 
+#include <libsolutil/Numeric.h>
 #include <libsolutil/Common.h>
 
 #include <map>
@@ -38,6 +39,7 @@ namespace solidity::yul
 {
 struct Dialect;
 struct SideEffects;
+class KnowledgeBase;
 
 /// Value assigned to a variable.
 struct AssignedValue
@@ -79,12 +81,14 @@ struct AssignedValue
 class DataFlowAnalyzer: public ASTModifier
 {
 public:
+	enum class MemoryAndStorage { Analyze, Ignore };
 	/// @param _functionSideEffects
 	///            Side-effects of user-defined functions. Worst-case side-effects are assumed
 	///            if this is not provided or the function is not found.
 	///            The parameter is mostly used to determine movability of expressions.
 	explicit DataFlowAnalyzer(
 		Dialect const& _dialect,
+		MemoryAndStorage _analyzeStores,
 		std::map<YulString, SideEffects> _functionSideEffects = {}
 	);
 
@@ -97,6 +101,13 @@ public:
 	void operator()(FunctionDefinition&) override;
 	void operator()(ForLoop&) override;
 	void operator()(Block& _block) override;
+
+	/// @returns the current value of the given variable, if known - always movable.
+	AssignedValue const* variableValue(YulString _variable) const { return util::valueOrNullptr(m_state.value, _variable); }
+	std::set<YulString> const* references(YulString _variable) const { return util::valueOrNullptr(m_state.references, _variable); }
+	std::map<YulString, AssignedValue> const& allValues() const { return m_state.value; }
+	std::optional<YulString> storageValue(YulString _key) const;
+	std::optional<YulString> memoryValue(YulString _key) const;
 
 protected:
 	/// Registers the assignment.
@@ -164,16 +175,24 @@ protected:
 	/// if this is not provided or the function is not found.
 	std::map<YulString, SideEffects> m_functionSideEffects;
 
-	/// Current values of variables, always movable.
-	std::map<YulString, AssignedValue> m_value;
-	/// m_references[a].contains(b) <=> the current expression assigned to a references b
-	std::unordered_map<YulString, std::set<YulString>> m_references;
+private:
+	struct State
+	{
+		/// Current values of variables, always movable.
+		std::map<YulString, AssignedValue> value;
+		/// m_references[a].contains(b) <=> the current expression assigned to a references b
+		std::unordered_map<YulString, std::set<YulString>> references;
 
-	std::unordered_map<YulString, YulString> m_storage;
-	std::unordered_map<YulString, YulString> m_memory;
+		std::unordered_map<YulString, YulString> storage;
+		std::unordered_map<YulString, YulString> memory;
+	};
+	State m_state;
 
+protected:
 	KnowledgeBase m_knowledgeBase;
 
+	/// If true, analyzes memory and storage content via mload/mstore and sload/sstore.
+	bool m_analyzeStores = true;
 	YulString m_storeFunctionName[static_cast<unsigned>(StoreLoadLocation::Last) + 1];
 	YulString m_loadFunctionName[static_cast<unsigned>(StoreLoadLocation::Last) + 1];
 

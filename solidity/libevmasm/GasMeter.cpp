@@ -47,7 +47,6 @@ GasMeter::GasConsumption GasMeter::estimateMax(AssemblyItem const& _item, bool _
 	case Push:
 	case PushTag:
 	case PushData:
-	case PushString:
 	case PushSub:
 	case PushSubSize:
 	case PushProgramSize:
@@ -185,7 +184,7 @@ GasMeter::GasConsumption GasMeter::estimateMax(AssemblyItem const& _item, bool _
 				if (*value)
 				{
 					// Note: msb() counts from 0 and throws on 0 as input.
-					unsigned const significantByteCount  = (unsigned)(boost::multiprecision::msb(*value) + 1 + 7) / 8;
+					unsigned const significantByteCount  = (static_cast<unsigned>(boost::multiprecision::msb(*value)) + 1u + 7u) / 8u;
 					gas += GasCosts::expByteGas(m_evmVersion) * significantByteCount;
 				}
 			}

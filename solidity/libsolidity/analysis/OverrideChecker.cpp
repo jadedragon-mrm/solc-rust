@@ -86,7 +86,8 @@ private:
 		int currentNode = static_cast<int>(numNodes++);
 		nodes[_function] = currentNode;
 		nodeInv[currentNode] = _function;
-		if (_function.overrides())
+
+		if (!_function.baseFunctions().empty())
 			for (auto const& baseFunction: _function.baseFunctions())
 				addEdge(currentNode, visit(baseFunction));
 		else
@@ -312,12 +313,21 @@ Token OverrideProxy::functionKind() const
 	}, m_item);
 }
 
-FunctionType const* OverrideProxy::functionType() const
+FunctionType const* OverrideProxy::externalFunctionType() const
 {
 	return std::visit(GenericVisitor{
 		[&](FunctionDefinition const* _item) { return FunctionType(*_item).asExternallyCallableFunction(false); },
 		[&](VariableDeclaration const* _item) { return FunctionType(*_item).asExternallyCallableFunction(false); },
 		[&](ModifierDefinition const*) -> FunctionType const* { solAssert(false, "Requested function type of modifier."); return nullptr; }
+	}, m_item);
+}
+
+FunctionType const* OverrideProxy::originalFunctionType() const
+{
+	return std::visit(GenericVisitor{
+		[&](FunctionDefinition const* _item) { return TypeProvider::function(*_item); },
+		[&](VariableDeclaration const*) -> FunctionType const* { solAssert(false, "Requested specific function type of variable."); return nullptr; },
+		[&](ModifierDefinition const*) -> FunctionType const* { solAssert(false, "Requested specific function type of modifier."); return nullptr; }
 	}, m_item);
 }
 
@@ -412,7 +422,7 @@ OverrideProxy::OverrideComparator const& OverrideProxy::overrideComparator() con
 			[&](FunctionDefinition const* _function)
 			{
 				vector<string> paramTypes;
-				for (Type const* t: functionType()->parameterTypes())
+				for (Type const* t: externalFunctionType()->parameterTypes())
 					paramTypes.emplace_back(t->richIdentifier());
 				return OverrideComparator{
 					_function->name(),
@@ -423,7 +433,7 @@ OverrideProxy::OverrideComparator const& OverrideProxy::overrideComparator() con
 			[&](VariableDeclaration const* _var)
 			{
 				vector<string> paramTypes;
-				for (Type const* t: functionType()->parameterTypes())
+				for (Type const* t: externalFunctionType()->parameterTypes())
 					paramTypes.emplace_back(t->richIdentifier());
 				return OverrideComparator{
 					_var->name(),
@@ -518,7 +528,7 @@ void OverrideChecker::checkOverride(OverrideProxy const& _overriding, OverridePr
 			"Override changes modifier signature."
 		);
 
-	if (!_overriding.overrides())
+	if (!_overriding.overrides() && !(_super.isFunction() && _super.contract().isInterface()))
 		overrideError(
 			_overriding,
 			_super,
@@ -588,19 +598,52 @@ void OverrideChecker::checkOverride(OverrideProxy const& _overriding, OverridePr
 
 	if (_super.isFunction())
 	{
-		FunctionType const* functionType = _overriding.functionType();
-		FunctionType const* superType = _super.functionType();
+		FunctionType const* functionType = _overriding.externalFunctionType();
+		FunctionType const* superType = _super.externalFunctionType();
 
+		bool returnTypesDifferAlready = false;
 		if (_overriding.functionKind() != Token::Fallback)
 		{
 			solAssert(functionType->hasEqualParameterTypes(*superType), "Override doesn't have equal parameters!");
 
 			if (!functionType->hasEqualReturnTypes(*superType))
+			{
+				returnTypesDifferAlready = true;
 				overrideError(
 					_overriding,
 					_super,
 					4822_error,
 					"Overriding " + _overriding.astNodeName() + " return types differ.",
+					"Overridden " + _overriding.astNodeName() + " is here:"
+				);
+			}
+		}
+
+		// The override proxy considers calldata and memory the same data location.
+		// Here we do a more specific check:
+		// Data locations of parameters and return variables have to match
+		// unless we have a public function overriding an external one.
+		if (
+			_overriding.isFunction() &&
+			!returnTypesDifferAlready &&
+			_super.visibility() != Visibility::External &&
+			_overriding.functionKind() != Token::Fallback
+		)
+		{
+			if (!_overriding.originalFunctionType()->hasEqualParameterTypes(*_super.originalFunctionType()))
+				overrideError(
+					_overriding,
+					_super,
+					7723_error,
+					"Data locations of parameters have to be the same when overriding non-external functions, but they differ.",
+					"Overridden " + _overriding.astNodeName() + " is here:"
+				);
+			if (!_overriding.originalFunctionType()->hasEqualReturnTypes(*_super.originalFunctionType()))
+				overrideError(
+					_overriding,
+					_super,
+					1443_error,
+					"Data locations of return variables have to be the same when overriding non-external functions, but they differ.",
 					"Overridden " + _overriding.astNodeName() + " is here:"
 				);
 		}
@@ -661,23 +704,21 @@ void OverrideChecker::overrideListError(
 	);
 }
 
-void OverrideChecker::overrideError(Declaration const& _overriding, Declaration const& _super, ErrorId _error, string const& _message, string const& _secondaryMsg)
+void OverrideChecker::overrideError(
+	OverrideProxy const& _overriding,
+	OverrideProxy const& _super,
+	ErrorId _error,
+	string const& _message,
+	optional<string> const& _secondaryMsg
+)
 {
 	m_errorReporter.typeError(
 		_error,
 		_overriding.location(),
-		SecondarySourceLocation().append(_secondaryMsg, _super.location()),
-		_message
-	);
-}
-
-
-void OverrideChecker::overrideError(OverrideProxy const& _overriding, OverrideProxy const& _super, ErrorId _error, string const& _message, string const& _secondaryMsg)
-{
-	m_errorReporter.typeError(
-		_error,
-		_overriding.location(),
-		SecondarySourceLocation().append(_secondaryMsg, _super.location()),
+		SecondarySourceLocation().append(
+			_secondaryMsg.value_or("Overridden " + _super.astNodeName() + " is here:"),
+			_super.location()
+		),
 		_message
 	);
 }
@@ -898,10 +939,11 @@ OverrideChecker::OverrideProxyBySignatureMultiSet const& OverrideChecker::inheri
 				if (var->isPublic())
 					functionsInBase.emplace(OverrideProxy{var});
 
-			for (OverrideProxy const& func: inheritedFunctions(*base))
-				functionsInBase.insert(func);
-
 			result += functionsInBase;
+
+			for (OverrideProxy const& func: inheritedFunctions(*base))
+				if (!functionsInBase.count(func))
+					result.insert(func);
 		}
 
 		m_inheritedFunctions[&_contract] = result;

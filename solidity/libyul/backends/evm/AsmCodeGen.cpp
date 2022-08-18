@@ -26,6 +26,8 @@
 #include <libyul/AST.h>
 #include <libyul/AsmAnalysisInfo.h>
 
+#include <libsolutil/StackTooDeepString.h>
+
 using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
@@ -37,7 +39,7 @@ void CodeGenerator::assemble(
 	AsmAnalysisInfo& _analysisInfo,
 	evmasm::Assembly& _assembly,
 	langutil::EVMVersion _evmVersion,
-	ExternalIdentifierAccess const& _identifierAccess,
+	ExternalIdentifierAccess::CodeGenerator _identifierAccessCodeGen,
 	bool _useNamedLabelsForFunctions,
 	bool _optimizeStackAllocation
 )
@@ -51,15 +53,17 @@ void CodeGenerator::assemble(
 		EVMDialect::strictAssemblyForEVM(_evmVersion),
 		builtinContext,
 		_optimizeStackAllocation,
-		_identifierAccess,
-		_useNamedLabelsForFunctions
+		_identifierAccessCodeGen,
+			_useNamedLabelsForFunctions ?
+			CodeTransform::UseNamedLabels::YesAndForceUnique :
+			CodeTransform::UseNamedLabels::Never
 	);
 	transform(_parsedData);
 	if (!transform.stackErrors().empty())
 		assertThrow(
 			false,
 			langutil::StackTooDeepError,
-			"Stack too deep when compiling inline assembly" +
+			util::stackTooDeepString + " When compiling inline assembly" +
 			(transform.stackErrors().front().comment() ? ": " + *transform.stackErrors().front().comment() : ".")
 		);
 }

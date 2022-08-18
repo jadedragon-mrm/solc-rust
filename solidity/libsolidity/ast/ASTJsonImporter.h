@@ -59,6 +59,7 @@ private:
 	ASTPointer<T> createASTNode(Json::Value const& _node, Args&&... _args);
 	/// @returns the sourceLocation-object created from the string in the JSON node
 	langutil::SourceLocation const createSourceLocation(Json::Value const& _node);
+	std::optional<std::vector<langutil::SourceLocation>> createSourceLocations(Json::Value const& _node) const;
 	/// Creates an ASTNode for a given JSON-ast of unknown type
 	/// @returns Pointer to a new created ASTNode
 	ASTPointer<ASTNode> convertJsonToASTNode(Json::Value const& _ast);
@@ -81,6 +82,7 @@ private:
 	ASTPointer<ASTNode> createStructDefinition(Json::Value const& _node);
 	ASTPointer<EnumDefinition> createEnumDefinition(Json::Value const& _node);
 	ASTPointer<EnumValue> createEnumValue(Json::Value const& _node);
+	ASTPointer<UserDefinedValueTypeDefinition> createUserDefinedValueTypeDefinition(Json::Value const& _node);
 	ASTPointer<ParameterList> createParameterList(Json::Value const& _node);
 	ASTPointer<OverrideSpecifier> createOverrideSpecifier(Json::Value const& _node);
 	ASTPointer<FunctionDefinition> createFunctionDefinition(Json::Value const& _node);
@@ -152,13 +154,10 @@ private:
 	///@}
 
 	// =========== member variables ===============
-	/// Stores filepath as sourcenames to AST in JSON format
-	std::map<std::string, Json::Value> m_sourceList;
-	/// list of filepaths (used as sourcenames)
-	std::vector<std::shared_ptr<std::string const>> m_sourceLocations;
+	/// list of source names, order by source index
+	std::vector<std::shared_ptr<std::string const>> m_sourceNames;
 	/// filepath to AST
 	std::map<std::string, ASTPointer<SourceUnit>> m_sourceUnits;
-	std::string m_currentSourceName;
 	/// IDs already used by the nodes
 	std::set<int64_t> m_usedIDs;
 	/// Configured EVM version

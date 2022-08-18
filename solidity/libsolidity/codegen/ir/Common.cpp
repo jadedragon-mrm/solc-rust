@@ -16,14 +16,22 @@
 */
 // SPDX-License-Identifier: GPL-3.0
 
-#include <libsolidity/codegen/ir/Common.h>
 #include <libsolidity/ast/TypeProvider.h>
+#include <libsolidity/codegen/ir/Common.h>
+#include <libsolidity/codegen/ir/IRGenerationContext.h>
 
 #include <libsolutil/CommonIO.h>
 
+#include <libyul/AsmPrinter.h>
+
 using namespace std;
-using namespace solidity::util;
+using namespace solidity::langutil;
 using namespace solidity::frontend;
+using namespace solidity::util;
+using namespace solidity::yul;
+
+namespace solidity::frontend
+{
 
 YulArity YulArity::fromType(FunctionType const& _functionType)
 {
@@ -33,10 +41,18 @@ YulArity YulArity::fromType(FunctionType const& _functionType)
 	};
 }
 
+string IRNames::externalFunctionABIWrapper(Declaration const& _functionOrVarDecl)
+{
+	if (auto const* function = dynamic_cast<FunctionDefinition const*>(&_functionOrVarDecl))
+		solAssert(!function->isConstructor());
+
+	return "external_fun_" + _functionOrVarDecl.name() + "_" + to_string(_functionOrVarDecl.id());
+}
+
 string IRNames::function(FunctionDefinition const& _function)
 {
 	if (_function.isConstructor())
-		return implicitConstructor(*_function.annotation().contract);
+		return constructor(*_function.annotation().contract);
 
 	return "fun_" + _function.name() + "_" + to_string(_function.id());
 }
@@ -78,7 +94,7 @@ string IRNames::internalDispatch(YulArity const& _arity)
 		"_out_" + to_string(_arity.out);
 }
 
-string IRNames::implicitConstructor(ContractDefinition const& _contract)
+string IRNames::constructor(ContractDefinition const& _contract)
 {
 	return "constructor_" + _contract.name() + "_" + to_string(_contract.id());
 }
@@ -121,4 +137,26 @@ string IRNames::tupleComponent(size_t _i)
 string IRNames::zeroValue(Type const& _type, string const& _variableName)
 {
 	return "zero_" + _type.identifier() + _variableName;
+}
+
+string dispenseLocationComment(langutil::SourceLocation const& _location, IRGenerationContext& _context)
+{
+	solAssert(_location.sourceName, "");
+	_context.markSourceUsed(*_location.sourceName);
+
+	string debugInfo = AsmPrinter::formatSourceLocation(
+		_location,
+		_context.sourceIndices(),
+		_context.debugInfoSelection(),
+		_context.soliditySourceProvider()
+	);
+
+	return debugInfo.empty() ? "" : "/// " + debugInfo;
+}
+
+string dispenseLocationComment(ASTNode const& _node, IRGenerationContext& _context)
+{
+	return dispenseLocationComment(_node.location(), _context);
+}
+
 }
